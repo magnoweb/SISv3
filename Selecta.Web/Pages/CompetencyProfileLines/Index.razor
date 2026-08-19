@@ -1,0 +1,152 @@
+@page "/competency-profile-lines"
+@attribute [Authorize]
+@inject CompetencyProfileLineApiClient CompetencyProfileLineApi
+@inject JobTitleCompetencyProfileApiClient JobTitleProfileApi
+@inject ProfessionalGroupCompetencyProfileApiClient ProfessionalGroupProfileApi
+@inject CompetencyApiClient CompetencyApi
+@inject CompetencyScoreApiClient CompetencyScoreApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Competency Profile Lines</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Competency Profile Lines</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Linhas de competência de um perfil — <MudLink Href="/job-title-competency-profiles">Job Title</MudLink> ou
+    <MudLink Href="/professional-group-competency-profiles">Professional Group</MudLink> Competency Profile.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New line
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um perfil (Job Title ou Professional Group) e uma
+        <MudLink Href="/competencies">Competency</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="CompetencyProfileLineDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CompetencyProfileLineDto" Property="CompetencyProfileName" Title="Profile" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="CompetencyProfileLineDto" Property="CompetencyName" Title="Competency" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="CompetencyProfileLineDto" Property="CompetencyScoreName" Title="Expected score" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="CompetencyProfileLineDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="line">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(line))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(line))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingLine is null ? "New line" : "Edit line")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_competencyProfileId" Data="@_profiles" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Profile" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_competencyId" Data="@_competencies" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Competency" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_competencyScoreId" Data="@_competencyScores" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Expected score (optional)" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} ({item.Acronym})")
+            </Template>
+        </RadzenDropDown>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CompetencyProfileLineDto>? _grid;
+    private IEnumerable<CompetencyProfileLineDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<ProfileOption>? _profiles;
+    private List<CompetencyDto>? _competencies;
+    private List<CompetencyScoreDto>? _competencyScores;
+
+    private bool CanCreate => _profiles is { Count: > 0 } && _competencies is { Count: > 0 };
+
+    private bool _showForm;
+    private CompetencyProfileLineDto? _editingLine;
+    private Guid _competencyProfileId;
+    private Guid _competencyId;
+    private Guid? _competencyScoreId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var jobTitleProfiles = await JobTitleProfileApi.GetAllAsync();
+        var groupProfiles = await ProfessionalGroupProfileApi.GetAllAsync();
+
+        _profiles = jobTitleProfiles.Select(p => new ProfileOption(p.Id, $"{p.Name} (Job Title)"))
+            .Concat(groupProfiles.Select(p => new ProfileOption(p.Id, $"{p.Name} (Professional Group)")))
+            .ToList();
+
+        _competencies = await CompetencyApi.GetAllAsync();
+        _competencyScores = await CompetencyScoreApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CompetencyProfileLineApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(CompetencyProfileLineDto? line)
+    {
+        _editingLine = line;
+        _competencyProfileId = line?.CompetencyProfileId ?? _profiles?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _competencyId = line?.CompetencyId ?? _competencies?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _competencyScoreId = line?.CompetencyScoreId;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingLine is null)
+            await CompetencyProfileLineApi.CreateAsync(new CreateCompetencyProfileLineDto(_competencyProfileId, _competencyId, _competencyScoreId));
+        else
+            await CompetencyProfileLineApi.UpdateAsync(new UpdateCompetencyProfileLineDto(_editingLine.Id, _competencyProfileId, _competencyId, _competencyScoreId));
+
+        Snackbar.Add("Line saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(CompetencyProfileLineDto line)
+    {
+        await CompetencyProfileLineApi.DeleteAsync(line.Id);
+        Snackbar.Add("Line deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Classe concreta propositadamente, em vez de List&lt;(Guid Id, string
+    /// Name)&gt; (tuplo) — RadzenDropDown resolve TextProperty/ValueProperty
+    /// por reflection sobre o tipo real em runtime; tuplos só expõem
+    /// Item1/Item2 nesse nível (os nomes amigáveis são só açúcar de
+    /// compilação), o que faria TextProperty="Name" falhar da mesma forma
+    /// que o bug do RadzenChart com tipo anónimo.
+    /// </summary>
+    private sealed record ProfileOption(Guid Id, string Name);
+}

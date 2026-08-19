@@ -1,0 +1,213 @@
+@page "/reports"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ReportApiClient ReportApi
+@inject AssessmentEventApiClient AssessmentEventApi
+@inject ReportTemplateApiClient ReportTemplateApi
+@inject UserApiClient UserApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Reports</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Reports</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde ao antigo "Laudo" — gerado a partir de um Assessment Event + Report Template.
+    Cada Assessment Event só pode ter um Report.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New report
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/assessment-events">Assessment Event</MudLink> e um
+        <MudLink Href="/report-templates">Report Template</MudLink> cadastrados antes de criar um laudo.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="ReportDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ReportDto" Property="CandidateName" Title="Candidate" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportDto" Property="ReportTemplateName" Title="Template" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportDto" Property="ResponsibleName" Title="Responsible" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportDto" Property="Average" Title="Average" Width="110px" />
+        <RadzenDataGridColumn TItem="ReportDto" Property="CreatedAt" Title="Created" FormatString="{0:dd/MM/yyyy}" Width="130px" />
+        <RadzenDataGridColumn TItem="ReportDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="report">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(report))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(report))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true }">
+    <TitleContent>@(_editingReport is null ? "New report" : "Edit report")</TitleContent>
+    <DialogContent>
+        @if (_editingReport is null)
+        {
+            <RadzenDropDown TValue="Guid" @bind-Value="_assessmentEventId" Data="@_assessmentEvents" TextProperty="CandidateName" ValueProperty="Id"
+                            AllowVirtualization="true" AllowFiltering="true" Placeholder="Assessment Event" Style="width:100%;" Class="mb-2">
+                <Template Context="item">
+                    @($"{item.CandidateName} ({((DateTime)item.Date).ToString("dd/MM/yyyy")})")
+                </Template>
+            </RadzenDropDown>
+        }
+
+        <RadzenDropDown TValue="int" @bind-Value="_reportTemplateId" Data="@_reportTemplates" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Report Template" Style="width:100%;" Class="mb-2" />
+
+        <MudTextField @bind-Value="_descriptive" Label="Descriptive" Lines="5" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_responsibleId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Responsible" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_supervisorId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Supervisor (optional)" Style="width:100%;" Class="mb-2" />
+
+        @if (_editingReport is not null)
+        {
+            <MudTextField @bind-Value="_fileName" Label="File name" Class="mb-2" />
+
+            <RadzenDropDown TValue="Guid?" @bind-Value="_responsibleSignatureId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                            AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Responsible signature (optional)" Style="width:100%;" Class="mb-2" />
+
+            <RadzenDropDown TValue="Guid?" @bind-Value="_supervisorSignatureId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                            AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Supervisor signature (optional)" Style="width:100%;" Class="mb-2" />
+
+            <MudNumericField @bind-Value="_utilization" Label="Utilization" Class="mb-2" />
+            <MudNumericField @bind-Value="_average" Label="Average" Class="mb-2" />
+        }
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ReportDto>? _grid;
+    private IEnumerable<ReportDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<AssessmentEventDto>? _assessmentEvents;
+    private List<ReportTemplateDto>? _reportTemplates;
+    private List<UserDto>? _users;
+
+    private bool CanCreate => _assessmentEvents is { Count: > 0 } && _reportTemplates is { Count: > 0 } && _users is { Count: > 0 };
+
+    private bool _showForm;
+    private ReportDto? _editingReport;
+    private Guid _assessmentEventId;
+    private int _reportTemplateId;
+    private string? _descriptive;
+    private string? _fileName;
+    private Guid _responsibleId;
+    private Guid? _supervisorId;
+    private Guid? _responsibleSignatureId;
+    private Guid? _supervisorSignatureId;
+    private double? _utilization;
+    private double? _average;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _assessmentEvents = await AssessmentEventApi.GetAllAsync();
+        _reportTemplates = await ReportTemplateApi.GetAllAsync();
+        _users = await UserApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ReportApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ReportDto? report)
+    {
+        _formError = null;
+        _editingReport = report;
+        _assessmentEventId = _assessmentEvents?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _reportTemplateId = report?.ReportTemplateId ?? _reportTemplates?.FirstOrDefault()?.Id ?? 0;
+        _descriptive = report?.Descriptive;
+        _fileName = report?.FileName;
+        _responsibleId = report?.ResponsibleId ?? _users?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _supervisorId = report?.SupervisorId;
+        _responsibleSignatureId = report?.ResponsibleSignatureId;
+        _supervisorSignatureId = report?.SupervisorSignatureId;
+        _utilization = report?.Utilization;
+        _average = report?.Average;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        try
+        {
+            if (_editingReport is null)
+            {
+                await ReportApi.CreateAsync(new CreateReportDto(_assessmentEventId, _reportTemplateId, _descriptive, _responsibleId, _supervisorId));
+            }
+            else
+            {
+                var updatedById = await GetCurrentUserIdAsync();
+                if (updatedById is null)
+                {
+                    _formError = "Não foi possível identificar o utilizador autenticado.";
+                    return;
+                }
+
+                await ReportApi.UpdateAsync(new UpdateReportDto(
+                    _editingReport.Id, _reportTemplateId, _descriptive, _fileName,
+                    _responsibleId, _supervisorId, _responsibleSignatureId, _supervisorSignatureId,
+                    _utilization, _average, updatedById.Value));
+            }
+
+            Snackbar.Add("Report saved.", Severity.Success);
+            _showForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private async Task DeleteAsync(ReportDto report)
+    {
+        await ReportApi.DeleteAsync(report.Id);
+        Snackbar.Add("Report deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

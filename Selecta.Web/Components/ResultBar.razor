@@ -1,0 +1,18 @@
+@{
+    var percentage = Total > 0 ? Math.Round(Count * 100.0 / Total, 0) : 0;
+}
+<div class="mb-3">
+    <div class="d-flex justify-space-between">
+        <MudText Typo="Typo.body2">@Count</MudText>
+        <MudText Typo="Typo.caption">@Label</MudText>
+        <MudText Typo="Typo.caption">@percentage%</MudText>
+    </div>
+    <MudProgressLinear Color="@Color" Value="@percentage" Class="mt-1" Rounded="true" Size="Size.Small" />
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public int Count { get; set; }
+    [Parameter, EditorRequired] public int Total { get; set; }
+    [Parameter] public Color Color { get; set; } = Color.Primary;
+}

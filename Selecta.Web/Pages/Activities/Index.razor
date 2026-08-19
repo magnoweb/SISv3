@@ -1,0 +1,118 @@
+@page "/activities"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject ActivityApiClient ActivityApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Activities</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Activities</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Catálogo de atividades (usado por modelos de laudo — produção/leitura). Atividades de "Sistema" não são editáveis aqui.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New activity
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="ActivityDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ActivityDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ActivityDto" Property="Duration" Title="Duration (min)" Width="150px" />
+        <RadzenDataGridColumn TItem="ActivityDto" Property="Origin" Title="Origin" Width="140px" />
+        <RadzenDataGridColumn TItem="ActivityDto" Property="System" Title="System" Width="100px" />
+        <RadzenDataGridColumn TItem="ActivityDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="ActivityDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="activity">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Disabled="activity.System" OnClick="@(() => OpenForm(activity))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" Disabled="activity.System" OnClick="@(() => DeleteAsync(activity))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingActivity is null ? "New activity" : "Edit activity")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudNumericField @bind-Value="_duration" Label="Duration (minutes)" Class="mb-2" />
+        <MudCheckBox @bind-Value="_flexibleDuration" Label="Flexible duration" Class="mb-2" />
+
+        <MudSelect @bind-Value="_origin" Label="Origin" Class="mb-2">
+            @foreach (var origin in Enum.GetValues<ServiceOrigin>())
+            {
+                <MudSelectItem Value="origin">@origin</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_editingActivity is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ActivityDto>? _grid;
+    private IEnumerable<ActivityDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private ActivityDto? _editingActivity;
+    private string _name = string.Empty;
+    private int _duration = 30;
+    private bool _flexibleDuration;
+    private ServiceOrigin _origin = ServiceOrigin.General;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ActivityApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ActivityDto? activity)
+    {
+        _editingActivity = activity;
+        _name = activity?.Name ?? string.Empty;
+        _duration = activity?.Duration ?? 30;
+        _flexibleDuration = activity?.FlexibleDuration ?? false;
+        _origin = activity?.Origin ?? ServiceOrigin.General;
+        _active = activity?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingActivity is null)
+            await ActivityApi.CreateAsync(new CreateActivityDto(_name, _duration, _flexibleDuration, _origin));
+        else
+            await ActivityApi.UpdateAsync(new UpdateActivityDto(_editingActivity.Id, _name, _duration, _flexibleDuration, _origin, _active));
+
+        Snackbar.Add("Activity saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ActivityDto activity)
+    {
+        await ActivityApi.DeleteAsync(activity.Id);
+        Snackbar.Add("Activity deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

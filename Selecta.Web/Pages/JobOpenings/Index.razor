@@ -1,0 +1,301 @@
+@page "/job-openings"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Selecta.Core.Entities.Enums
+@inject JobOpeningApiClient JobOpeningApi
+@inject ContactApiClient ContactApi
+@inject JobTitleApiClient JobTitleApi
+@inject RecruitmentStageApiClient RecruitmentStageApi
+@inject UserApiClient UserApi
+@inject CompanyApiClient CompanyApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Job Openings</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Job Openings</MudText>
+
+<div class="d-flex align-center mb-4 gap-4">
+    <MudSwitch @bind-Value="_activeOnly" Color="Color.Primary" Label="Active only" @bind-Value:after="ReloadGridAsync" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+        New job opening
+    </MudButton>
+</div>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/contacts">Contact</MudLink>,
+        <MudLink Href="/job-titles">Job Title</MudLink> e
+        <MudLink Href="/recruitment-stages">Recruitment Stage</MudLink> cadastrados antes de criar uma vaga.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="JobOpeningDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="Status" Title="Status" Width="140px">
+            <Template Context="job">
+                <MudChip T="string" Size="Size.Small" Color="@StatusColor(job.Status)">@job.Status</MudChip>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="ManagerName" Title="Manager" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="ContactName" Title="Contact" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="JobTitleName" Title="Job Title" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="RecruitmentStageName" Title="Stage" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="Quantity" Title="Qty" Width="90px" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Property="OpenDuration" Title="Open for" Sortable="false" Filterable="false" Width="130px" />
+        <RadzenDataGridColumn TItem="JobOpeningDto" Sortable="false" Filterable="false" Width="140px" TextAlign="TextAlign.Center">
+            <Template Context="job">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(job))" />
+                <MudIconButton Icon="@Icons.Material.Filled.SwapHoriz" Size="Size.Small" OnClick="@(() => OpenStatusForm(job))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(job))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingJob is null ? "New job opening" : "Edit job opening")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_summary" Label="Summary" Lines="3" Class="mb-2" />
+        <MudNumericField @bind-Value="_deadlineDays" Label="Deadline (days)" Class="mb-2" />
+        <MudNumericField @bind-Value="_quantity" Label="Quantity" Class="mb-2" />
+        <MudNumericField @bind-Value="_salary" Label="Salary" Format="F2" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_managerId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Manager" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_contactId" Data="@_contacts" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Contact" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} ({CompanyName((Guid)item.CompanyId)})")
+            </Template>
+        </RadzenDropDown>
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_jobTitleId" Data="@_jobTitles" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Job Title" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} ({CompanyName((Guid)item.CompanyId)})")
+            </Template>
+        </RadzenDropDown>
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_recruitmentStageId" Data="@_stages" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Recruitment Stage" Style="width:100%;" Class="mb-2" />
+
+        @if (_editingJob is null)
+        {
+            <MudTextField @bind-Value="_ticketId" Label="Ticket ID"
+                          HelperText="Módulo de tickets ainda não portado — cola o Guid, se aplicável, ou deixa o Guid vazio." />
+        }
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_showStatusForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>Change status@(_statusEditingJob is null ? "" : $" — {_statusEditingJob.Name}")</TitleContent>
+    <DialogContent>
+        <MudSelect @bind-Value="_newStatus" Label="New status">
+            @foreach (var status in Enum.GetValues<JobOpeningStatus>())
+            {
+                <MudSelectItem Value="status">@status</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (!string.IsNullOrEmpty(_statusFormError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_statusFormError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseStatusForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveStatusAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<JobOpeningDto>? _grid;
+    private IEnumerable<JobOpeningDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _activeOnly;
+    private bool _referenceDataLoaded;
+
+    private List<ContactDto>? _contacts;
+    private List<JobTitleDto>? _jobTitles;
+    private List<RecruitmentStageDto>? _stages;
+    private List<UserDto>? _users;
+    private List<CompanyDto>? _companies;
+
+    private bool CanCreate => _contacts is { Count: > 0 } && _jobTitles is { Count: > 0 } && _stages is { Count: > 0 } && _users is { Count: > 0 };
+
+    private bool _showForm;
+    private JobOpeningDto? _editingJob;
+    private string _name = string.Empty;
+    private string _summary = string.Empty;
+    private int _deadlineDays = 30;
+    private int _quantity = 1;
+    private decimal? _salary;
+    private Guid _managerId;
+    private Guid _contactId;
+    private Guid _jobTitleId;
+    private Guid _recruitmentStageId;
+    private string _ticketId = Guid.Empty.ToString();
+    private string? _formError;
+
+    private bool _showStatusForm;
+    private JobOpeningDto? _statusEditingJob;
+    private JobOpeningStatus _newStatus;
+    private string? _statusFormError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await CompanyApi.GetAllAsync();
+        _contacts = await ContactApi.GetAllAsync();
+        _jobTitles = await JobTitleApi.GetAllAsync();
+        _stages = (await RecruitmentStageApi.GetAllAsync()).OrderBy(s => s.Order).ToList();
+        _users = await UserApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await JobOpeningApi.GetPagedAsync(page, pageSize, _activeOnly, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private string CompanyName(Guid companyId) =>
+        _companies?.FirstOrDefault(c => c.Id == companyId)?.TradeName ?? companyId.ToString();
+
+    private void OpenForm(JobOpeningDto? job)
+    {
+        _formError = null;
+        _editingJob = job;
+        _name = job?.Name ?? string.Empty;
+        _summary = job?.Summary ?? string.Empty;
+        _deadlineDays = job?.DeadlineDays ?? 30;
+        _quantity = job?.Quantity ?? 1;
+        _salary = job?.Salary;
+        _managerId = job?.ManagerId ?? _users?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _contactId = job?.ContactId ?? _contacts?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _jobTitleId = job?.JobTitleId ?? _jobTitles?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _recruitmentStageId = job?.RecruitmentStageId ?? _stages?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _ticketId = Guid.Empty.ToString();
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        try
+        {
+            if (_editingJob is null)
+            {
+                if (!Guid.TryParse(_ticketId, out var ticketId))
+                {
+                    _formError = "Ticket ID inválido.";
+                    return;
+                }
+
+                var createdById = await GetCurrentUserIdAsync();
+                if (createdById is null)
+                {
+                    _formError = "Não foi possível identificar o utilizador autenticado.";
+                    return;
+                }
+
+                await JobOpeningApi.CreateAsync(new CreateJobOpeningDto(
+                    ticketId, _managerId, _contactId, _jobTitleId, _recruitmentStageId,
+                    _name, _summary, _deadlineDays, _quantity, _salary, createdById.Value));
+            }
+            else
+            {
+                await JobOpeningApi.UpdateAsync(new UpdateJobOpeningDto(
+                    _editingJob.Id, _managerId, _contactId, _jobTitleId, _recruitmentStageId,
+                    _name, _summary, _deadlineDays, _quantity, _salary, _editingJob.PaymentDate));
+            }
+
+            Snackbar.Add("Job opening saved.", Severity.Success);
+            _showForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private void OpenStatusForm(JobOpeningDto job)
+    {
+        _statusFormError = null;
+        _statusEditingJob = job;
+        _newStatus = job.Status;
+        _showStatusForm = true;
+    }
+
+    private void CloseStatusForm() => _showStatusForm = false;
+
+    private async Task SaveStatusAsync()
+    {
+        if (_statusEditingJob is null) return;
+
+        _statusFormError = null;
+
+        try
+        {
+            await JobOpeningApi.ChangeStatusAsync(new ChangeJobOpeningStatusDto(_statusEditingJob.Id, _newStatus));
+            Snackbar.Add("Status updated.", Severity.Success);
+            _showStatusForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _statusFormError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(JobOpeningDto job)
+    {
+        await JobOpeningApi.DeleteAsync(job.Id);
+        Snackbar.Add("Job opening deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+
+    private static Color StatusColor(JobOpeningStatus status) => status switch
+    {
+        JobOpeningStatus.New => Color.Default,
+        JobOpeningStatus.InProgress => Color.Info,
+        JobOpeningStatus.InReplacement => Color.Warning,
+        JobOpeningStatus.Finished => Color.Success,
+        JobOpeningStatus.Cancelled => Color.Error,
+        _ => Color.Default,
+    };
+}

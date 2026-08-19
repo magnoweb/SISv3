@@ -1,0 +1,167 @@
+@page "/companies"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject CompanyApiClient CompanyApi
+@inject CityApiClient CityApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Companies</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Companies</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New company
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="CompanyDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CompanyDto" Property="TradeName" Title="Trade name" />
+        <RadzenDataGridColumn TItem="CompanyDto" Property="LegalName" Title="Legal name" />
+        <RadzenDataGridColumn TItem="CompanyDto" Property="Document" Title="Document" Width="160px" />
+        <RadzenDataGridColumn TItem="CompanyDto" Property="Type" Title="Type" Width="130px" />
+        <RadzenDataGridColumn TItem="CompanyDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="CompanyDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="company">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(company))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(company))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingCompany is null ? "New company" : "Edit company")</TitleContent>
+    <DialogContent>
+        <MudSelect @bind-Value="_type" Label="Type" Class="mb-2">
+            @foreach (var type in Enum.GetValues<CompanyType>())
+            {
+                <MudSelectItem Value="type">@type</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_legalName" Label="Legal name" Class="mb-2" />
+        <MudTextField @bind-Value="_tradeName" Label="Trade name" Class="mb-2" />
+        <MudTextField @bind-Value="_document" Label="Document" Class="mb-2" />
+        <MudTextField @bind-Value="_address" Label="Address" Class="mb-2" />
+        <MudTextField @bind-Value="_neighborhood" Label="Neighborhood" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_cityId" Data="@_cities" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="City" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} / {item.State}")
+            </Template>
+        </RadzenDropDown>
+
+        <MudTextField @bind-Value="_postalCode" Label="Postal code" Class="mb-2" />
+        <MudTextField @bind-Value="_phone1" Label="Phone" Class="mb-2" />
+        <MudTextField @bind-Value="_notes" Label="Notes" Lines="2" Class="mb-2" />
+
+        @if (_editingCompany is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CompanyDto>? _grid;
+    private IEnumerable<CompanyDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<CityDto>? _cities;
+
+    private bool _showForm;
+    private CompanyDto? _editingCompany;
+    private CompanyType _type = CompanyType.Client;
+    private string _legalName = string.Empty;
+    private string _tradeName = string.Empty;
+    private string _document = string.Empty;
+    private string? _address;
+    private string? _neighborhood;
+    private Guid? _cityId;
+    private string? _postalCode;
+    private string? _phone1;
+    private string? _notes;
+    private bool _active = true;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync() => _cities = await CityApi.GetAllAsync();
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CompanyApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(CompanyDto? company)
+    {
+        _formError = null;
+        _editingCompany = company;
+        _type = company?.Type ?? CompanyType.Client;
+        _legalName = company?.LegalName ?? string.Empty;
+        _tradeName = company?.TradeName ?? string.Empty;
+        _document = company?.Document ?? string.Empty;
+        _address = company?.Address;
+        _neighborhood = company?.Neighborhood;
+        _cityId = company?.CityId;
+        _postalCode = company?.PostalCode;
+        _phone1 = company?.Phone1;
+        _notes = company?.Notes;
+        _active = company?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        try
+        {
+            if (_editingCompany is null)
+            {
+                await CompanyApi.CreateAsync(new CreateCompanyDto(
+                    _type, _legalName, _tradeName, _document, null, _address, null, _neighborhood,
+                    null, null, _postalCode, _phone1, null, _notes, _cityId));
+            }
+            else
+            {
+                await CompanyApi.UpdateAsync(new UpdateCompanyDto(
+                    _editingCompany.Id, _type, _legalName, _tradeName, _document, null, _address, null, _neighborhood,
+                    null, null, _postalCode, _phone1, null, _notes, _active, _cityId));
+            }
+
+            Snackbar.Add("Company saved.", Severity.Success);
+            _showForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(CompanyDto company)
+    {
+        await CompanyApi.DeleteAsync(company.Id);
+        Snackbar.Add("Company deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

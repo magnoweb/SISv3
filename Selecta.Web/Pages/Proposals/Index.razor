@@ -1,0 +1,240 @@
+@page "/proposals"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Components.Authorization
+@using Selecta.Core.Entities.Enums
+@inject ProposalApiClient ProposalApi
+@inject ServiceOfferingApiClient ServiceOfferingApi
+@inject ProspectCompanyApiClient ProspectCompanyApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Proposals</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Proposals</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New proposal
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/service-offerings">Service Offering</MudLink> e uma
+        <MudLink Href="/prospect-companies">Prospect Company</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="ProposalDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ProposalDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ProposalDto" Property="Status" Title="Status" Width="130px">
+            <Template Context="proposal">
+                <MudChip T="string" Size="Size.Small" Color="@StatusColor(proposal.Status)">@proposal.Status</MudChip>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ProposalDto" Property="ServiceOfferingName" Title="Service" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ProposalDto" Property="ProspectCompanyName" Title="Prospect" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ProposalDto" Title="Open for" Sortable="false" Filterable="false">
+            <Template Context="proposal">@proposal.TotalDays days (@proposal.TotalWorkingDays working days)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ProposalDto" Sortable="false" Filterable="false" Width="140px" TextAlign="TextAlign.Center">
+            <Template Context="proposal">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(proposal))" />
+                <MudIconButton Icon="@Icons.Material.Filled.SwapHoriz" Size="Size.Small" OnClick="@(() => OpenStatusForm(proposal))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(proposal))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingProposal is null ? "New proposal" : "Edit proposal")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="3" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_serviceOfferingId" Data="@_serviceOfferings" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Service" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_prospectCompanyId" Data="@_prospectCompanies" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Prospect company" Style="width:100%;" Class="mb-2" />
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_showStatusForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>Change status@(_statusEditingProposal is null ? "" : $" — {_statusEditingProposal.Name}")</TitleContent>
+    <DialogContent>
+        <MudSelect @bind-Value="_newStatus" Label="New status" Class="mb-2">
+            @foreach (var status in Enum.GetValues<ProposalStatus>())
+            {
+                <MudSelectItem Value="status">@status</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_newStatus == ProposalStatus.Declined)
+        {
+            <MudSelect T="DeclineReason?" @bind-Value="_declineReason" Label="Decline reason">
+                @foreach (var reason in Enum.GetValues<DeclineReason>())
+                {
+                    <MudSelectItem T="DeclineReason?" Value="reason">@reason</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        @if (!string.IsNullOrEmpty(_statusFormError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_statusFormError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseStatusForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveStatusAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ProposalDto>? _grid;
+    private IEnumerable<ProposalDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<ServiceOfferingDto>? _serviceOfferings;
+    private List<ProspectCompanyDto>? _prospectCompanies;
+
+    private bool CanCreate => _serviceOfferings is { Count: > 0 } && _prospectCompanies is { Count: > 0 };
+
+    private bool _showForm;
+    private ProposalDto? _editingProposal;
+    private string _name = string.Empty;
+    private string _description = string.Empty;
+    private Guid _serviceOfferingId;
+    private Guid _prospectCompanyId;
+    private string? _formError;
+
+    private bool _showStatusForm;
+    private ProposalDto? _statusEditingProposal;
+    private ProposalStatus _newStatus;
+    private DeclineReason? _declineReason;
+    private string? _statusFormError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _serviceOfferings = await ServiceOfferingApi.GetAllAsync();
+        _prospectCompanies = await ProspectCompanyApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ProposalApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ProposalDto? proposal)
+    {
+        _formError = null;
+        _editingProposal = proposal;
+        _name = proposal?.Name ?? string.Empty;
+        _description = proposal?.Description ?? string.Empty;
+        _serviceOfferingId = proposal?.ServiceOfferingId ?? _serviceOfferings?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _prospectCompanyId = proposal?.ProspectCompanyId ?? _prospectCompanies?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_editingProposal is null)
+        {
+            var createdById = await GetCurrentUserIdAsync();
+            if (createdById is null)
+            {
+                _formError = "Não foi possível identificar o utilizador autenticado.";
+                return;
+            }
+
+            await ProposalApi.CreateAsync(new CreateProposalDto(_serviceOfferingId, _prospectCompanyId, createdById.Value, _name, _description));
+        }
+        else
+        {
+            await ProposalApi.UpdateAsync(new UpdateProposalDto(_editingProposal.Id, _serviceOfferingId, _prospectCompanyId, _name, _description));
+        }
+
+        Snackbar.Add("Proposal saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private void OpenStatusForm(ProposalDto proposal)
+    {
+        _statusFormError = null;
+        _statusEditingProposal = proposal;
+        _newStatus = proposal.Status;
+        _declineReason = proposal.DeclineReason;
+        _showStatusForm = true;
+    }
+
+    private void CloseStatusForm() => _showStatusForm = false;
+
+    private async Task SaveStatusAsync()
+    {
+        if (_statusEditingProposal is null) return;
+
+        _statusFormError = null;
+
+        try
+        {
+            await ProposalApi.ChangeStatusAsync(new ChangeProposalStatusDto(_statusEditingProposal.Id, _newStatus, _declineReason));
+            Snackbar.Add("Status updated.", Severity.Success);
+            _showStatusForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _statusFormError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(ProposalDto proposal)
+    {
+        await ProposalApi.DeleteAsync(proposal.Id);
+        Snackbar.Add("Proposal deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+
+    private static Color StatusColor(ProposalStatus status) => status switch
+    {
+        ProposalStatus.Pending => Color.Default,
+        ProposalStatus.Accepted => Color.Success,
+        ProposalStatus.Declined => Color.Error,
+        _ => Color.Default,
+    };
+}

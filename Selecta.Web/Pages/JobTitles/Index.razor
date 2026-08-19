@@ -1,0 +1,152 @@
+@page "/job-titles"
+@attribute [Authorize]
+@inject JobTitleApiClient JobTitleApi
+@inject CompanyApiClient CompanyApi
+@inject ProfessionalGroupApiClient ProfessionalGroupApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Job Titles</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Job Titles</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New job title
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Cria pelo menos uma <MudLink Href="/companies">Company</MudLink> e um
+        <MudLink Href="/professional-groups">Professional Group</MudLink> antes de adicionar cargos.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="JobTitleDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="JobTitleDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="JobTitleDto" Property="CompanyId" Title="Company" Sortable="false" Filterable="false">
+            <Template Context="jobTitle">@CompanyName(jobTitle.CompanyId)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="JobTitleDto" Property="ProfessionalGroupId" Title="Professional Group" Sortable="false" Filterable="false">
+            <Template Context="jobTitle">@ProfessionalGroupName(jobTitle.ProfessionalGroupId)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="JobTitleDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="JobTitleDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="jobTitle">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(jobTitle))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(jobTitle))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingJobTitle is null ? "New job title" : "Edit job title")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_companyId" Data="@_companies" TextProperty="TradeName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Company" Style="width:100%;" Class="mb-2" />
+
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="2" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_professionalGroupId" Data="@_professionalGroups" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Professional Group" Style="width:100%;" Class="mb-2" />
+
+        @if (_editingJobTitle is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<JobTitleDto>? _grid;
+    private IEnumerable<JobTitleDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<CompanyDto>? _companies;
+    private List<ProfessionalGroupDto>? _professionalGroups;
+    private bool _referenceDataLoaded;
+
+    private bool CanCreate => _companies is { Count: > 0 } && _professionalGroups is { Count: > 0 };
+
+    private bool _showForm;
+    private JobTitleDto? _editingJobTitle;
+    private Guid _companyId;
+    private string _name = string.Empty;
+    private string? _description;
+    private Guid _professionalGroupId;
+    private bool _active = true;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await CompanyApi.GetAllAsync();
+        _professionalGroups = await ProfessionalGroupApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await JobTitleApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private string CompanyName(Guid companyId) =>
+        _companies?.FirstOrDefault(c => c.Id == companyId)?.TradeName ?? companyId.ToString();
+
+    private string ProfessionalGroupName(Guid professionalGroupId) =>
+        _professionalGroups?.FirstOrDefault(g => g.Id == professionalGroupId)?.Name ?? professionalGroupId.ToString();
+
+    private void OpenForm(JobTitleDto? jobTitle)
+    {
+        _formError = null;
+        _editingJobTitle = jobTitle;
+        _companyId = jobTitle?.CompanyId ?? _companies?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _name = jobTitle?.Name ?? string.Empty;
+        _description = jobTitle?.Description;
+        _professionalGroupId = jobTitle?.ProfessionalGroupId ?? _professionalGroups?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _active = jobTitle?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_editingJobTitle is null)
+            await JobTitleApi.CreateAsync(new CreateJobTitleDto(_companyId, _professionalGroupId, _name, _description));
+        else
+            await JobTitleApi.UpdateAsync(new UpdateJobTitleDto(_editingJobTitle.Id, _companyId, _professionalGroupId, _name, _description, _active));
+
+        Snackbar.Add("Job title saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(JobTitleDto jobTitle)
+    {
+        await JobTitleApi.DeleteAsync(jobTitle.Id);
+        Snackbar.Add("Job title deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

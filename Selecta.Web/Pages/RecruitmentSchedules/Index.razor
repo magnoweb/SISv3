@@ -1,0 +1,231 @@
+@page "/recruitment-schedules"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Selecta.Core.Entities.Enums
+@inject RecruitmentScheduleApiClient RecruitmentScheduleApi
+@inject JobOpeningApiClient JobOpeningApi
+@inject UserApiClient UserApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Recruitment Schedules</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Recruitment Schedules</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde à "Agenda de Recrutamento" da v2 — entrevistas, provas e dinâmicas de grupo para uma
+    <MudLink Href="/job-openings">Job Opening</MudLink>.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New schedule
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos uma <MudLink Href="/job-openings">Job Opening</MudLink> cadastrada.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="RecruitmentScheduleDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Property="Name" Title="Candidate" />
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Property="JobOpeningName" Title="Job Opening" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="130px" />
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Property="ScheduleType" Title="Type" Width="160px" />
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Property="Status" Title="Status" Width="130px" />
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Property="HasHistory" Title="History" Width="100px" />
+        <RadzenDataGridColumn TItem="RecruitmentScheduleDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="item">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(item))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(item))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingItem is null ? "New schedule" : "Edit schedule")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_jobOpeningId" Data="@_jobOpenings" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Job Opening" Style="width:100%;" Class="mb-2" />
+
+        <MudTextField @bind-Value="_name" Label="Candidate name" Class="mb-2" />
+        <MudTextField @bind-Value="_cpf" Label="CPF" Class="mb-2" />
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-2" />
+        <MudTimePicker @bind-Time="_time" Label="Time" Class="mb-2" />
+
+        @if (_editingItem is null)
+        {
+            <MudTextField @bind-Value="_ticketId" Label="Ticket ID"
+                          HelperText="Módulo de tickets ainda não portado — cola o Guid, se aplicável, ou deixa o Guid vazio." Class="mb-2" />
+        }
+
+        <MudSelect @bind-Value="_scheduleType" Label="Schedule type" Class="mb-2">
+            @foreach (var type in Enum.GetValues<RecruitmentScheduleType>())
+            {
+                <MudSelectItem Value="type">@type</MudSelectItem>
+            }
+        </MudSelect>
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_responsibleId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Responsible" Style="width:100%;" Class="mb-2" />
+
+        <MudCheckBox @bind-Value="_clientInterview" Label="Client interview" Class="mb-2" />
+
+        @if (_editingItem is not null)
+        {
+            <MudSelect @bind-Value="_status" Label="Status" Class="mb-2">
+                @foreach (var status in Enum.GetValues<ScheduleStatus>())
+                {
+                    <MudSelectItem Value="status">@status</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect @bind-Value="_result" Label="Result" Class="mb-2">
+                @foreach (var result in Enum.GetValues<InterviewResult>())
+                {
+                    <MudSelectItem Value="result">@result</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudCheckBox @bind-Value="_hired" Label="Hired" Class="mb-2" />
+        }
+
+        <MudTextField @bind-Value="_internalNotes" Label="Internal notes" Lines="3" />
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<RecruitmentScheduleDto>? _grid;
+    private IEnumerable<RecruitmentScheduleDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<JobOpeningDto>? _jobOpenings;
+    private List<UserDto>? _users;
+
+    private bool CanCreate => _jobOpenings is { Count: > 0 };
+
+    private bool _showForm;
+    private RecruitmentScheduleDto? _editingItem;
+    private Guid _jobOpeningId;
+    private string _name = string.Empty;
+    private string _cpf = string.Empty;
+    private string _ticketId = Guid.Empty.ToString();
+    private DateTime? _date = DateTime.Today;
+    private TimeSpan? _time;
+    private RecruitmentScheduleType _scheduleType = RecruitmentScheduleType.Interview;
+    private Guid _responsibleId;
+    private bool _clientInterview;
+    private ScheduleStatus _status = ScheduleStatus.Pending;
+    private InterviewResult _result = InterviewResult.NoResult;
+    private bool _hired;
+    private string? _internalNotes;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _jobOpenings = await JobOpeningApi.GetAllAsync();
+        _users = await UserApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await RecruitmentScheduleApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(RecruitmentScheduleDto? item)
+    {
+        _formError = null;
+        _editingItem = item;
+        _jobOpeningId = item?.JobOpeningId ?? _jobOpenings?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _name = item?.Name ?? string.Empty;
+        _cpf = item?.Cpf ?? string.Empty;
+        _ticketId = Guid.Empty.ToString();
+        _date = item?.Date ?? DateTime.Today;
+        _time = item?.Time;
+        _scheduleType = item?.ScheduleType ?? RecruitmentScheduleType.Interview;
+        _responsibleId = item?.ResponsibleId ?? _users?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _clientInterview = item?.ClientInterview ?? false;
+        _status = item?.Status ?? ScheduleStatus.Pending;
+        _result = item?.Result ?? InterviewResult.NoResult;
+        _hired = item?.Hired ?? false;
+        _internalNotes = item?.InternalNotes;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_date is null || _time is null) return;
+
+        if (_editingItem is null)
+        {
+            if (!Guid.TryParse(_ticketId, out var ticketId))
+            {
+                _formError = "Ticket ID inválido.";
+                return;
+            }
+
+            var createdById = await GetCurrentUserIdAsync();
+            if (createdById is null)
+            {
+                _formError = "Não foi possível identificar o utilizador autenticado.";
+                return;
+            }
+
+            await RecruitmentScheduleApi.CreateAsync(new CreateRecruitmentScheduleDto(
+                _jobOpeningId, ticketId, _responsibleId, _clientInterview, _scheduleType,
+                _name, _cpf, _date.Value, _time.Value, _internalNotes, createdById.Value));
+        }
+        else
+        {
+            await RecruitmentScheduleApi.UpdateAsync(new UpdateRecruitmentScheduleDto(
+                _editingItem.Id, _jobOpeningId, _responsibleId, _clientInterview, _hired, _scheduleType, _result,
+                _name, _cpf, _date.Value, _time.Value, _status, _internalNotes));
+        }
+
+        Snackbar.Add("Schedule saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private async Task DeleteAsync(RecruitmentScheduleDto item)
+    {
+        await RecruitmentScheduleApi.DeleteAsync(item.Id);
+        Snackbar.Add("Schedule deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

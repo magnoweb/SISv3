@@ -1,0 +1,100 @@
+@page "/professional-groups"
+@attribute [Authorize]
+@inject ProfessionalGroupApiClient ProfessionalGroupApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Professional Groups</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Professional Groups</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New group
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="ProfessionalGroupDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ProfessionalGroupDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ProfessionalGroupDto" Property="Description" Title="Description" />
+        <RadzenDataGridColumn TItem="ProfessionalGroupDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="ProfessionalGroupDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="group">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(group))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(group))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingGroup is null ? "New group" : "Edit group")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="2" Class="mb-2" />
+
+        @if (_editingGroup is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ProfessionalGroupDto>? _grid;
+    private IEnumerable<ProfessionalGroupDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private ProfessionalGroupDto? _editingGroup;
+    private string _name = string.Empty;
+    private string? _description;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ProfessionalGroupApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ProfessionalGroupDto? group)
+    {
+        _editingGroup = group;
+        _name = group?.Name ?? string.Empty;
+        _description = group?.Description;
+        _active = group?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingGroup is null)
+            await ProfessionalGroupApi.CreateAsync(new CreateProfessionalGroupDto(_name, _description));
+        else
+            await ProfessionalGroupApi.UpdateAsync(new UpdateProfessionalGroupDto(_editingGroup.Id, _name, _description, _active));
+
+        Snackbar.Add("Group saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ProfessionalGroupDto group)
+    {
+        await ProfessionalGroupApi.DeleteAsync(group.Id);
+        Snackbar.Add("Group deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

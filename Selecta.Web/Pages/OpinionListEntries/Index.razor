@@ -1,0 +1,144 @@
+@page "/opinion-list-entries"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject OpinionListEntryApiClient OpinionListEntryApi
+@inject OpinionListApiClient OpinionListApi
+@inject AssessmentEventApiClient AssessmentEventApi
+@inject EvaluationResultApiClient EvaluationResultApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Opinion List Entries</PageTitle>
+<MudText Typo="Typo.h4" Class="mb-4">Opinion List Entries</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Linhas de uma <MudLink Href="/opinion-lists">Opinion List</MudLink> — liga um
+    <MudLink Href="/assessment-events">Assessment Event</MudLink> a um resultado/parecer.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New entry
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos uma <MudLink Href="/opinion-lists">Opinion List</MudLink> e um
+        <MudLink Href="/assessment-events">Assessment Event</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="OpinionListEntryDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="OpinionListEntryDto" Property="CandidateName" Title="Candidate" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="OpinionListEntryDto" Property="Result" Title="Result" Width="180px" />
+        <RadzenDataGridColumn TItem="OpinionListEntryDto" Property="EvaluationResultName" Title="Label" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="OpinionListEntryDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="entry">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(entry))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(entry))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingEntry is null ? "New entry" : "Edit entry")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_opinionListId" Data="@_opinionLists" TextProperty="Code" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Opinion List" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_assessmentEventId" Data="@_assessmentEvents" TextProperty="CandidateName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Assessment Event" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.CandidateName} ({((DateTime)item.Date).ToString("dd/MM/yyyy")})")
+            </Template>
+        </RadzenDropDown>
+
+        <MudSelect @bind-Value="_result" Label="Result" Class="mb-2">
+            @foreach (var result in Enum.GetValues<AssessmentResult>())
+            {
+                <MudSelectItem Value="result">@result</MudSelectItem>
+            }
+        </MudSelect>
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_evaluationResultId" Data="@_evaluationResults" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Label (optional)" Style="width:100%;" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<OpinionListEntryDto>? _grid;
+    private IEnumerable<OpinionListEntryDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<OpinionListDto>? _opinionLists;
+    private List<AssessmentEventDto>? _assessmentEvents;
+    private List<EvaluationResultDto>? _evaluationResults;
+
+    private bool CanCreate => _opinionLists is { Count: > 0 } && _assessmentEvents is { Count: > 0 };
+
+    private bool _showForm;
+    private OpinionListEntryDto? _editingEntry;
+    private Guid _opinionListId;
+    private Guid _assessmentEventId;
+    private AssessmentResult _result = AssessmentResult.NoResult;
+    private Guid? _evaluationResultId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _opinionLists = await OpinionListApi.GetAllAsync();
+        _assessmentEvents = await AssessmentEventApi.GetAllAsync();
+        _evaluationResults = await EvaluationResultApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await OpinionListEntryApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(OpinionListEntryDto? entry)
+    {
+        _editingEntry = entry;
+        _opinionListId = entry?.OpinionListId ?? _opinionLists?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _assessmentEventId = entry?.AssessmentEventId ?? _assessmentEvents?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _result = entry?.Result ?? AssessmentResult.NoResult;
+        _evaluationResultId = entry?.EvaluationResultId;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingEntry is null)
+            await OpinionListEntryApi.CreateAsync(new CreateOpinionListEntryDto(_opinionListId, _assessmentEventId, _result, _evaluationResultId));
+        else
+            await OpinionListEntryApi.UpdateAsync(new UpdateOpinionListEntryDto(_editingEntry.Id, _opinionListId, _assessmentEventId, _result, _evaluationResultId));
+
+        Snackbar.Add("Entry saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(OpinionListEntryDto entry)
+    {
+        await OpinionListEntryApi.DeleteAsync(entry.Id);
+        Snackbar.Add("Entry deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

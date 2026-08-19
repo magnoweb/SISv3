@@ -1,0 +1,143 @@
+@page "/competency-score-descriptors"
+@attribute [Authorize]
+@inject CompetencyScoreDescriptorApiClient CompetencyScoreDescriptorApi
+@inject CompetencyDescriptorApiClient CompetencyDescriptorApi
+@inject CompetencyScoreApiClient CompetencyScoreApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Competency Score Descriptors</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Competency Score Descriptors</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Liga um <MudLink Href="/competency-descriptors">Competency Descriptor</MudLink> a um
+    <MudLink Href="/competency-scores">Competency Score</MudLink>, com um texto próprio.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New score descriptor
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/competency-descriptors">Competency Descriptor</MudLink> e um
+        <MudLink Href="/competency-scores">Competency Score</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="CompetencyScoreDescriptorDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CompetencyScoreDescriptorDto" Property="CompetencyDescriptorName" Title="Descriptor" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDescriptorDto" Property="CompetencyScoreName" Title="Score" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDescriptorDto" Property="Descriptive" Title="Descriptive" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDescriptorDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDescriptorDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="descriptor">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(descriptor))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(descriptor))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingDescriptor is null ? "New score descriptor" : "Edit score descriptor")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_competencyDescriptorId" Data="@_competencyDescriptors" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Competency Descriptor" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} ({item.CompetencyName})")
+            </Template>
+        </RadzenDropDown>
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_competencyScoreId" Data="@_competencyScores" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Competency Score" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} ({item.Acronym})")
+            </Template>
+        </RadzenDropDown>
+
+        <MudTextField @bind-Value="_descriptive" Label="Descriptive" Lines="4" Class="mb-2" />
+
+        @if (_editingDescriptor is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CompetencyScoreDescriptorDto>? _grid;
+    private IEnumerable<CompetencyScoreDescriptorDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<CompetencyDescriptorDto>? _competencyDescriptors;
+    private List<CompetencyScoreDto>? _competencyScores;
+
+    private bool CanCreate => _competencyDescriptors is { Count: > 0 } && _competencyScores is { Count: > 0 };
+
+    private bool _showForm;
+    private CompetencyScoreDescriptorDto? _editingDescriptor;
+    private Guid _competencyDescriptorId;
+    private Guid _competencyScoreId;
+    private string _descriptive = string.Empty;
+    private bool _active = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _competencyDescriptors = await CompetencyDescriptorApi.GetAllAsync();
+        _competencyScores = await CompetencyScoreApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CompetencyScoreDescriptorApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(CompetencyScoreDescriptorDto? descriptor)
+    {
+        _editingDescriptor = descriptor;
+        _competencyDescriptorId = descriptor?.CompetencyDescriptorId ?? _competencyDescriptors?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _competencyScoreId = descriptor?.CompetencyScoreId ?? _competencyScores?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _descriptive = descriptor?.Descriptive ?? string.Empty;
+        _active = descriptor?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingDescriptor is null)
+            await CompetencyScoreDescriptorApi.CreateAsync(new CreateCompetencyScoreDescriptorDto(_competencyDescriptorId, _competencyScoreId, _descriptive));
+        else
+            await CompetencyScoreDescriptorApi.UpdateAsync(new UpdateCompetencyScoreDescriptorDto(_editingDescriptor.Id, _competencyDescriptorId, _competencyScoreId, _descriptive, _active));
+
+        Snackbar.Add("Score descriptor saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(CompetencyScoreDescriptorDto descriptor)
+    {
+        await CompetencyScoreDescriptorApi.DeleteAsync(descriptor.Id);
+        Snackbar.Add("Score descriptor deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

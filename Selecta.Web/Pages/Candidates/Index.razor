@@ -1,0 +1,159 @@
+@page "/candidates"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject CandidateApiClient CandidateApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Candidates</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Candidates</MudText>
+
+<MudPaper Class="pa-4 mb-4 d-flex align-center gap-4" Elevation="0" Outlined="true">
+    <MudTextField @bind-Value="_searchTerm" Label="Search by name or CPF" Class="flex-grow-1"
+                  Immediate="true" OnKeyUp="@(async e => { if (e.Key == "Enter") await SearchAsync(); })" />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">Search</MudButton>
+    <MudButton Variant="Variant.Text" OnClick="ClearSearchAsync">Clear</MudButton>
+</MudPaper>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New candidate
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="CandidateDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CandidateDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="CandidateDto" Property="Gender" Title="Gender" Width="130px" />
+        <RadzenDataGridColumn TItem="CandidateDto" Property="BirthDate" Title="Birth date" FormatString="{0:dd/MM/yyyy}" Width="150px" />
+        <RadzenDataGridColumn TItem="CandidateDto" Property="Cpf" Title="CPF" Width="160px" />
+        <RadzenDataGridColumn TItem="CandidateDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="candidate">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(candidate))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(candidate))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingCandidate is null ? "New candidate" : "Edit candidate")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+
+        <MudSelect @bind-Value="_gender" Label="Gender" Class="mb-2">
+            <MudSelectItem Value="Gender.Female">Female</MudSelectItem>
+            <MudSelectItem Value="Gender.Male">Male</MudSelectItem>
+        </MudSelect>
+
+        <MudDatePicker @bind-Date="_birthDate" Label="Birth date" Class="mb-2" />
+
+        <MudTextField @bind-Value="_cpf" Label="CPF" Class="mb-2" />
+        <MudTextField @bind-Value="_identityDocument" Label="Identity document (RG)" />
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CandidateDto>? _grid;
+    private IEnumerable<CandidateDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private string _searchTerm = string.Empty;
+
+    private bool _showForm;
+    private CandidateDto? _editingCandidate;
+    private string _name = string.Empty;
+    private Gender _gender = Gender.Female;
+    private DateTime? _birthDate;
+    private string _cpf = string.Empty;
+    private string _identityDocument = string.Empty;
+    private string? _formError;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        if (!string.IsNullOrWhiteSpace(_searchTerm))
+        {
+            var found = await CandidateApi.SearchAsync(_searchTerm);
+            if (found is null)
+                Snackbar.Add("No candidate found for that name/CPF.", Severity.Warning);
+
+            _items = found is null ? [] : [found];
+            _count = _items.Count();
+            return;
+        }
+
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CandidateApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private Task SearchAsync() => ReloadGridAsync();
+
+    private async Task ClearSearchAsync()
+    {
+        _searchTerm = string.Empty;
+        await ReloadGridAsync();
+    }
+
+    private void OpenForm(CandidateDto? candidate)
+    {
+        _formError = null;
+        _editingCandidate = candidate;
+        _name = candidate?.Name ?? string.Empty;
+        _gender = candidate?.Gender ?? Gender.Female;
+        _birthDate = candidate?.BirthDate;
+        _cpf = candidate?.Cpf ?? string.Empty;
+        _identityDocument = candidate?.IdentityDocument ?? string.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_birthDate is null)
+        {
+            _formError = "Informe a data de nascimento.";
+            return;
+        }
+
+        try
+        {
+            if (_editingCandidate is null)
+                await CandidateApi.CreateAsync(new CreateCandidateDto(_name, _gender, _birthDate.Value, _cpf, _identityDocument));
+            else
+                await CandidateApi.UpdateAsync(new UpdateCandidateDto(_editingCandidate.Id, _name, _gender, _birthDate.Value, _cpf, _identityDocument));
+
+            Snackbar.Add("Candidate saved.", Severity.Success);
+            _showForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(CandidateDto candidate)
+    {
+        await CandidateApi.DeleteAsync(candidate.Id);
+        Snackbar.Add("Candidate deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

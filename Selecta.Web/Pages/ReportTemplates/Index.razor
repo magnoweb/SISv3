@@ -1,0 +1,156 @@
+@page "/report-templates"
+@attribute [Authorize]
+@inject ReportTemplateApiClient ReportTemplateApi
+@inject ActivityApiClient ActivityApi
+@inject ReportComponentApiClient ReportComponentApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Report Templates</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Report Templates</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Modelos de laudo — corresponde ao antigo "Tipo de Laudo". Define o texto base e as
+    atividades/blocos usados ao gerar um laudo a partir deste modelo.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="_activities is null || _activities.Count == 0">
+    New template
+</MudButton>
+
+@if (_activities is not null && _activities.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Cria pelo menos uma <MudLink Href="/activities">Activity</MudLink> antes de criar um modelo de laudo.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="ReportTemplateDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ReportTemplateDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ReportTemplateDto" Property="ProductionActivityName" Title="Production activity" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportTemplateDto" Property="ReadingActivityName" Title="Reading activity" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportTemplateDto" Property="UseCompetencies" Title="Uses competencies" Width="150px" />
+        <RadzenDataGridColumn TItem="ReportTemplateDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="ReportTemplateDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="template">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(template))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(template))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingTemplate is null ? "New template" : "Edit template")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_template" Label="Template" Lines="6" Class="mb-2" />
+
+        <RadzenDropDown TValue="int" @bind-Value="_productionActivityId" Data="@_activities" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Production activity" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="int" @bind-Value="_readingActivityId" Data="@_activities" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Reading activity" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_headerId" Data="@_components" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Header (optional)" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_footerId" Data="@_components" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Footer (optional)" Style="width:100%;" Class="mb-2" />
+
+        <MudCheckBox @bind-Value="_attachmentReport" Label="Attachment report" Class="mb-2" />
+        <MudCheckBox @bind-Value="_useCompetencies" Label="Uses competencies" Class="mb-2" />
+
+        @if (_editingTemplate is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ReportTemplateDto>? _grid;
+    private IEnumerable<ReportTemplateDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<ActivityDto>? _activities;
+    private List<ReportComponentDto>? _components;
+
+    private bool _showForm;
+    private ReportTemplateDto? _editingTemplate;
+    private string _name = string.Empty;
+    private string? _template;
+    private int _productionActivityId;
+    private int _readingActivityId;
+    private Guid? _headerId;
+    private Guid? _footerId;
+    private bool _attachmentReport;
+    private bool _useCompetencies;
+    private bool _active = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _activities = await ActivityApi.GetAllAsync();
+        _components = await ReportComponentApi.GetAllAsync();
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ReportTemplateApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ReportTemplateDto? template)
+    {
+        _editingTemplate = template;
+        _name = template?.Name ?? string.Empty;
+        _template = template?.Template;
+        _productionActivityId = template?.ProductionActivityId ?? _activities?.FirstOrDefault()?.Id ?? 0;
+        _readingActivityId = template?.ReadingActivityId ?? _activities?.FirstOrDefault()?.Id ?? 0;
+        _headerId = template?.HeaderId;
+        _footerId = template?.FooterId;
+        _attachmentReport = template?.AttachmentReport ?? false;
+        _useCompetencies = template?.UseCompetencies ?? false;
+        _active = template?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingTemplate is null)
+        {
+            await ReportTemplateApi.CreateAsync(new CreateReportTemplateDto(
+                _name, _template, _productionActivityId, _readingActivityId, _headerId, _footerId, _attachmentReport, _useCompetencies));
+        }
+        else
+        {
+            await ReportTemplateApi.UpdateAsync(new UpdateReportTemplateDto(
+                _editingTemplate.Id, _name, _template, _productionActivityId, _readingActivityId, _headerId, _footerId, _attachmentReport, _useCompetencies, _active));
+        }
+
+        Snackbar.Add("Template saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ReportTemplateDto template)
+    {
+        await ReportTemplateApi.DeleteAsync(template.Id);
+        Snackbar.Add("Template deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

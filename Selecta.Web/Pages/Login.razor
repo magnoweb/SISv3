@@ -1,0 +1,60 @@
+@page "/login"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@inject AuthApiClient AuthApi
+@inject JwtAuthenticationStateProvider AuthProvider
+@inject NavigationManager Navigation
+
+<MudContainer MaxWidth="MaxWidth.ExtraSmall" Class="d-flex flex-column justify-center" Style="height:100vh;">
+    <MudPaper Class="pa-8" Elevation="3">
+        <MudText Typo="Typo.h5" Class="mb-1" Style="color:var(--mud-palette-primary);">SIS . Sistema Integrado Selecta</MudText>
+        <MudDivider Class="mb-4" />
+
+        <MudTextField @bind-Value="_login" Label="Login or e-mail" Variant="Variant.Outlined" Class="mb-3"
+                      Immediate="true" OnKeyUp="@(async e => { if (e.Key == "Enter") await SignInAsync(); })" />
+
+        <MudTextField @bind-Value="_password" Label="Password" Variant="Variant.Outlined" InputType="InputType.Password"
+                      Immediate="true" OnKeyUp="@(async e => { if (e.Key == "Enter") await SignInAsync(); })" />
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert>
+        }
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-4"
+                   Disabled="_signingIn" OnClick="SignInAsync">
+            @(_signingIn ? "Signing in…" : "Sign in")
+        </MudButton>
+
+        <MudDivider Class="mt-6 mb-3" />
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-weight:600;">Selecta Instituto de Psicologia LTDA.</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Default">v3.0</MudText>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string _login = string.Empty;
+    private string _password = string.Empty;
+    private string? _error;
+    private bool _signingIn;
+
+    [Parameter, SupplyParameterFromQuery]
+    public string? RedirectTo { get; set; }
+
+    private async Task SignInAsync()
+    {
+        _error = null;
+        _signingIn = true;
+
+        var result = await AuthApi.LoginAsync(_login, _password);
+        if (result is null)
+        {
+            _error = "Invalid login or password.";
+            _signingIn = false;
+            return;
+        }
+
+        await AuthProvider.NotifyLoginAsync(result.Token);
+        Navigation.NavigateTo(string.IsNullOrWhiteSpace(RedirectTo) ? "/" : $"/{RedirectTo}", forceLoad: false);
+    }
+}

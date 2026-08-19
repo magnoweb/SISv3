@@ -1,0 +1,96 @@
+@page "/evaluation-results"
+@attribute [Authorize]
+@inject EvaluationResultApiClient EvaluationResultApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Evaluation Results</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Evaluation Results</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New result
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="EvaluationResultDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="EvaluationResultDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="EvaluationResultDto" Property="Value" Title="Value" Width="120px" />
+        <RadzenDataGridColumn TItem="EvaluationResultDto" Property="CssClass" Title="CSS class" Width="150px" />
+        <RadzenDataGridColumn TItem="EvaluationResultDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="result">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(result))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(result))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingResult is null ? "New result" : "Edit result")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudNumericField @bind-Value="_value" Label="Value" Class="mb-2" />
+        <MudTextField @bind-Value="_cssClass" Label="CSS class" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<EvaluationResultDto>? _grid;
+    private IEnumerable<EvaluationResultDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private EvaluationResultDto? _editingResult;
+    private string _name = string.Empty;
+    private int _value;
+    private string _cssClass = string.Empty;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await EvaluationResultApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(EvaluationResultDto? result)
+    {
+        _editingResult = result;
+        _name = result?.Name ?? string.Empty;
+        _value = result?.Value ?? 0;
+        _cssClass = result?.CssClass ?? string.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingResult is null)
+            await EvaluationResultApi.CreateAsync(new CreateEvaluationResultDto(_name, _value, _cssClass));
+        else
+            await EvaluationResultApi.UpdateAsync(new UpdateEvaluationResultDto(_editingResult.Id, _name, _value, _cssClass));
+
+        Snackbar.Add("Result saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(EvaluationResultDto result)
+    {
+        await EvaluationResultApi.DeleteAsync(result.Id);
+        Snackbar.Add("Result deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

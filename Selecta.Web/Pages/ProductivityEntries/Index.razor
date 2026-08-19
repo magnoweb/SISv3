@@ -1,0 +1,146 @@
+@page "/productivity-entries"
+@attribute [Authorize]
+@inject ProductivityEntryApiClient ProductivityEntryApi
+@inject AssessmentEventApiClient AssessmentEventApi
+@inject ActivityApiClient ActivityApi
+@inject UserApiClient UserApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Productivity Entries</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Productivity Entries</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde à aba "Produtividade" de um <MudLink Href="/assessment-events">Assessment Event</MudLink> —
+    tempo gasto numa <MudLink Href="/activities">Activity</MudLink>.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New entry
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/assessment-events">Assessment Event</MudLink> e uma
+        <MudLink Href="/activities">Activity</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="ProductivityEntryDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ProductivityEntryDto" Property="CandidateName" Title="Candidate" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ProductivityEntryDto" Property="ActivityName" Title="Activity" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ProductivityEntryDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="130px" />
+        <RadzenDataGridColumn TItem="ProductivityEntryDto" Property="Duration" Title="Duration (min)" Width="150px" />
+        <RadzenDataGridColumn TItem="ProductivityEntryDto" Property="UserName" Title="Responsible" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ProductivityEntryDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="entry">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(entry))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(entry))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingEntry is null ? "New entry" : "Edit entry")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_assessmentEventId" Data="@_assessmentEvents" TextProperty="CandidateName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Assessment Event" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.CandidateName} ({((DateTime)item.Date).ToString("dd/MM/yyyy")})")
+            </Template>
+        </RadzenDropDown>
+
+        <RadzenDropDown TValue="int" @bind-Value="_activityId" Data="@_activities" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Activity" Style="width:100%;" Class="mb-2" />
+
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-2" />
+        <MudNumericField @bind-Value="_duration" Label="Duration (minutes)" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_userId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Responsible" Style="width:100%;" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ProductivityEntryDto>? _grid;
+    private IEnumerable<ProductivityEntryDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<AssessmentEventDto>? _assessmentEvents;
+    private List<ActivityDto>? _activities;
+    private List<UserDto>? _users;
+
+    private bool CanCreate => _assessmentEvents is { Count: > 0 } && _activities is { Count: > 0 };
+
+    private bool _showForm;
+    private ProductivityEntryDto? _editingEntry;
+    private Guid _assessmentEventId;
+    private int _activityId;
+    private DateTime? _date = DateTime.Today;
+    private int _duration = 30;
+    private Guid _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _assessmentEvents = await AssessmentEventApi.GetAllAsync();
+        _activities = await ActivityApi.GetAllAsync();
+        _users = await UserApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ProductivityEntryApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ProductivityEntryDto? entry)
+    {
+        _editingEntry = entry;
+        _assessmentEventId = entry?.AssessmentEventId ?? _assessmentEvents?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _activityId = entry?.ActivityId ?? _activities?.FirstOrDefault()?.Id ?? 0;
+        _date = entry?.Date ?? DateTime.Today;
+        _duration = entry?.Duration ?? 30;
+        _userId = entry?.UserId ?? _users?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_date is null) return;
+
+        if (_editingEntry is null)
+            await ProductivityEntryApi.CreateAsync(new CreateProductivityEntryDto(_assessmentEventId, _activityId, _date.Value, _duration, _userId));
+        else
+            await ProductivityEntryApi.UpdateAsync(new UpdateProductivityEntryDto(_editingEntry.Id, _assessmentEventId, _activityId, _date.Value, _duration, _userId));
+
+        Snackbar.Add("Entry saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ProductivityEntryDto entry)
+    {
+        await ProductivityEntryApi.DeleteAsync(entry.Id);
+        Snackbar.Add("Entry deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

@@ -1,0 +1,129 @@
+@page "/assessment-event-tests"
+@attribute [Authorize]
+@inject AssessmentEventTestApiClient AssessmentEventTestApi
+@inject AssessmentEventApiClient AssessmentEventApi
+@inject PsychologicalTestApiClient PsychologicalTestApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Assessment Event Tests</PageTitle>
+<MudText Typo="Typo.h4" Class="mb-4">Assessment Event Tests</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde à aba "Testes" de um <MudLink Href="/assessment-events">Assessment Event</MudLink>.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New test entry
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/assessment-events">Assessment Event</MudLink> e um
+        <MudLink Href="/psychological-tests">Psychological Test</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="AssessmentEventTestDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="AssessmentEventTestDto" Property="CandidateName" Title="Candidate" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="AssessmentEventTestDto" Property="PsychologicalTestName" Title="Test" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="AssessmentEventTestDto" Property="Percentage" Title="Percentage" Width="130px" />
+        <RadzenDataGridColumn TItem="AssessmentEventTestDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="item">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(item))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(item))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingItem is null ? "New test entry" : "Edit test entry")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_assessmentEventId" Data="@_assessmentEvents" TextProperty="CandidateName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Assessment Event" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.CandidateName} ({((DateTime)item.Date).ToString("dd/MM/yyyy")})")
+            </Template>
+        </RadzenDropDown>
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_psychologicalTestId" Data="@_psychologicalTests" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Psychological Test" Style="width:100%;" Class="mb-2" />
+
+        <MudNumericField @bind-Value="_percentage" Label="Percentage" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<AssessmentEventTestDto>? _grid;
+    private IEnumerable<AssessmentEventTestDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<AssessmentEventDto>? _assessmentEvents;
+    private List<PsychologicalTestDto>? _psychologicalTests;
+
+    private bool CanCreate => _assessmentEvents is { Count: > 0 } && _psychologicalTests is { Count: > 0 };
+
+    private bool _showForm;
+    private AssessmentEventTestDto? _editingItem;
+    private Guid _assessmentEventId;
+    private Guid _psychologicalTestId;
+    private int? _percentage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _assessmentEvents = await AssessmentEventApi.GetAllAsync();
+        _psychologicalTests = await PsychologicalTestApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await AssessmentEventTestApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(AssessmentEventTestDto? item)
+    {
+        _editingItem = item;
+        _assessmentEventId = item?.AssessmentEventId ?? _assessmentEvents?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _psychologicalTestId = item?.PsychologicalTestId ?? _psychologicalTests?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _percentage = item?.Percentage;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingItem is null)
+            await AssessmentEventTestApi.CreateAsync(new CreateAssessmentEventTestDto(_assessmentEventId, _psychologicalTestId, _percentage));
+        else
+            await AssessmentEventTestApi.UpdateAsync(new UpdateAssessmentEventTestDto(_editingItem.Id, _assessmentEventId, _psychologicalTestId, _percentage));
+
+        Snackbar.Add("Test entry saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(AssessmentEventTestDto item)
+    {
+        await AssessmentEventTestApi.DeleteAsync(item.Id);
+        Snackbar.Add("Test entry deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

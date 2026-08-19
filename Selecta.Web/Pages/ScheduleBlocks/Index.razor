@@ -1,0 +1,127 @@
+@page "/schedule-blocks"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject ScheduleBlockApiClient ScheduleBlockApi
+@inject UserApiClient UserApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Schedule Blocks</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Schedule Blocks</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Bloqueios de agenda (indisponibilidade) por utilizador. Não são editados — remove e cria de novo se precisares de ajustar.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="OpenForm" Disabled="_users is null || _users.Count == 0">
+    New block
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="ScheduleBlockDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ScheduleBlockDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="150px" />
+        <RadzenDataGridColumn TItem="ScheduleBlockDto" Property="Time" Title="Time" Width="120px">
+            <Template Context="block">@(block.Time?.ToString(@"hh\:mm") ?? "Whole day")</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ScheduleBlockDto" Property="Origin" Title="Origin" Width="150px" />
+        <RadzenDataGridColumn TItem="ScheduleBlockDto" Property="UserName" Title="User" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ScheduleBlockDto" Sortable="false" Filterable="false" Width="80px" TextAlign="TextAlign.Center">
+            <Template Context="block">
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(block))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>New schedule block</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_userId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="User" Style="width:100%;" Class="mb-2" />
+
+        <MudSelect @bind-Value="_origin" Label="Origin" Class="mb-2">
+            @foreach (var origin in Enum.GetValues<ServiceOrigin>())
+            {
+                <MudSelectItem Value="origin">@origin</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-2" />
+
+        <MudCheckBox T="bool" Value="_wholeDay" ValueChanged="OnWholeDayChanged" Label="Whole day" Class="mb-2" />
+
+        @if (!_wholeDay)
+        {
+            <MudTimePicker @bind-Time="_time" Label="Time" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ScheduleBlockDto>? _grid;
+    private IEnumerable<ScheduleBlockDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<UserDto>? _users;
+
+    private bool _showForm;
+    private Guid _userId;
+    private ServiceOrigin _origin = ServiceOrigin.General;
+    private DateTime? _date = DateTime.Today;
+    private bool _wholeDay = true;
+    private TimeSpan? _time;
+
+    protected override async Task OnInitializedAsync() => _users = await UserApi.GetAllAsync();
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ScheduleBlockApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm()
+    {
+        _userId = _users?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _origin = ServiceOrigin.General;
+        _date = DateTime.Today;
+        _wholeDay = true;
+        _time = null;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private void OnWholeDayChanged(bool value)
+    {
+        _wholeDay = value;
+        if (value) _time = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_date is null) return;
+
+        await ScheduleBlockApi.CreateAsync(new CreateScheduleBlockDto(_origin, _date.Value, _wholeDay ? null : _time, _userId));
+        Snackbar.Add("Schedule block created.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ScheduleBlockDto block)
+    {
+        await ScheduleBlockApi.DeleteAsync(block.Id);
+        Snackbar.Add("Schedule block deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

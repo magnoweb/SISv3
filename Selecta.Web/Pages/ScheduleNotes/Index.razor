@@ -1,0 +1,130 @@
+@page "/schedule-notes"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Selecta.Core.Entities.Enums
+@inject ScheduleNoteApiClient ScheduleNoteApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Schedule Notes</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Schedule Notes</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde ao modal "Observações na agenda" da v2 — uma nota geral sobre um dia/horário,
+    não ligada a um agendamento específico.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New note
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="ScheduleNoteDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ScheduleNoteDto" Property="Origin" Title="Origin" Width="140px" />
+        <RadzenDataGridColumn TItem="ScheduleNoteDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="130px" />
+        <RadzenDataGridColumn TItem="ScheduleNoteDto" Property="Description" Title="Description" />
+        <RadzenDataGridColumn TItem="ScheduleNoteDto" Property="CreatedByName" Title="Created by" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ScheduleNoteDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="note">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(note))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(note))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingNote is null ? "New note" : "Edit note")</TitleContent>
+    <DialogContent>
+        <MudSelect @bind-Value="_origin" Label="Origin" Class="mb-2">
+            @foreach (var origin in Enum.GetValues<ServiceOrigin>())
+            {
+                <MudSelectItem Value="origin">@origin</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-2" />
+        <MudTimePicker @bind-Time="_time" Label="Time (optional)" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="4" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ScheduleNoteDto>? _grid;
+    private IEnumerable<ScheduleNoteDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private ScheduleNoteDto? _editingNote;
+    private ServiceOrigin _origin = ServiceOrigin.General;
+    private DateTime? _date = DateTime.Today;
+    private TimeSpan? _time;
+    private string _description = string.Empty;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ScheduleNoteApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ScheduleNoteDto? note)
+    {
+        _editingNote = note;
+        _origin = note?.Origin ?? ServiceOrigin.General;
+        _date = note?.Date ?? DateTime.Today;
+        _time = note?.Time;
+        _description = note?.Description ?? string.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_date is null) return;
+
+        if (_editingNote is null)
+        {
+            var createdById = await GetCurrentUserIdAsync();
+            if (createdById is null) return;
+
+            await ScheduleNoteApi.CreateAsync(new CreateScheduleNoteDto(_origin, _date.Value, _time, _description, createdById.Value));
+        }
+        else
+        {
+            await ScheduleNoteApi.UpdateAsync(new UpdateScheduleNoteDto(_editingNote.Id, _origin, _date.Value, _time, _description));
+        }
+
+        Snackbar.Add("Note saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private async Task DeleteAsync(ScheduleNoteDto note)
+    {
+        await ScheduleNoteApi.DeleteAsync(note.Id);
+        Snackbar.Add("Note deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

@@ -1,0 +1,120 @@
+@page "/report-components"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject ReportComponentApiClient ReportComponentApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Report Components</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Report Components</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Blocos reutilizáveis (cabeçalho, rodapé, tag, conteúdo) usados na montagem de modelos de laudo.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New component
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="ReportComponentDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ReportComponentDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ReportComponentDto" Property="ComponentType" Title="Type" Width="180px" />
+        <RadzenDataGridColumn TItem="ReportComponentDto" Property="Tag" Title="Tag" Width="150px" />
+        <RadzenDataGridColumn TItem="ReportComponentDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="ReportComponentDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="component">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(component))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(component))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingComponent is null ? "New component" : "Edit component")</TitleContent>
+    <DialogContent>
+        <MudSelect @bind-Value="_componentType" Label="Type" Class="mb-2">
+            @foreach (var type in Enum.GetValues<ComponentType>())
+            {
+                <MudSelectItem Value="type">@type</MudSelectItem>
+            }
+        </MudSelect>
+
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_tag" Label="Tag" Class="mb-2" />
+        <MudTextField @bind-Value="_fileName" Label="File name" Class="mb-2" />
+        <MudTextField @bind-Value="_content" Label="Content" Lines="4" Class="mb-2" />
+
+        @if (_editingComponent is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ReportComponentDto>? _grid;
+    private IEnumerable<ReportComponentDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private ReportComponentDto? _editingComponent;
+    private ComponentType _componentType = ComponentType.Tag;
+    private string _name = string.Empty;
+    private string? _tag;
+    private string? _fileName;
+    private string? _content;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ReportComponentApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ReportComponentDto? component)
+    {
+        _editingComponent = component;
+        _componentType = component?.ComponentType ?? ComponentType.Tag;
+        _name = component?.Name ?? string.Empty;
+        _tag = component?.Tag;
+        _fileName = component?.FileName;
+        _content = component?.Content;
+        _active = component?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingComponent is null)
+            await ReportComponentApi.CreateAsync(new CreateReportComponentDto(_componentType, _name, _tag, _fileName, _content));
+        else
+            await ReportComponentApi.UpdateAsync(new UpdateReportComponentDto(_editingComponent.Id, _componentType, _name, _tag, _fileName, _content, _active));
+
+        Snackbar.Add("Component saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ReportComponentDto component)
+    {
+        await ReportComponentApi.DeleteAsync(component.Id);
+        Snackbar.Add("Component deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

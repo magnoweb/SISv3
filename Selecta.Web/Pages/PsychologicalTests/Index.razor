@@ -1,0 +1,99 @@
+@page "/psychological-tests"
+@attribute [Authorize]
+@inject PsychologicalTestApiClient PsychologicalTestApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Psychological Tests</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Psychological Tests</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New test
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="PsychologicalTestDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="PsychologicalTestDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="PsychologicalTestDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="PsychologicalTestDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="test">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(test))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(test))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingTest is null ? "New test" : "Edit test")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="2" Class="mb-2" />
+
+        @if (_editingTest is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<PsychologicalTestDto>? _grid;
+    private IEnumerable<PsychologicalTestDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private PsychologicalTestDto? _editingTest;
+    private string _name = string.Empty;
+    private string? _description;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await PsychologicalTestApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(PsychologicalTestDto? test)
+    {
+        _editingTest = test;
+        _name = test?.Name ?? string.Empty;
+        _description = test?.Description;
+        _active = test?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingTest is null)
+            await PsychologicalTestApi.CreateAsync(new CreatePsychologicalTestDto(_name, _description));
+        else
+            await PsychologicalTestApi.UpdateAsync(new UpdatePsychologicalTestDto(_editingTest.Id, _name, _description, _active));
+
+        Snackbar.Add("Test saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(PsychologicalTestDto test)
+    {
+        await PsychologicalTestApi.DeleteAsync(test.Id);
+        Snackbar.Add("Test deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

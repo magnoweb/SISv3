@@ -1,0 +1,118 @@
+@page "/competency-scores"
+@attribute [Authorize]
+@inject CompetencyScoreApiClient CompetencyScoreApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Competency Scores</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Competency Scores</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New score
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="CompetencyScoreDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CompetencyScoreDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDto" Property="Acronym" Title="Acronym" Width="120px" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDto" Property="Value" Title="Value" Width="100px" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDto" Property="Color" Title="Color" Width="120px">
+            <Template Context="score">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="width:16px;height:16px;border-radius:4px;background-color:@score.Color;border:1px solid #ccc;"></div>
+                    @score.Color
+                </div>
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="CompetencyScoreDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="CompetencyScoreDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="score">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(score))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(score))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingScore is null ? "New score" : "Edit score")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_acronym" Label="Acronym" MaxLength="2" Class="mb-2" />
+        <MudTextField @bind-Value="_color" Label="Color (hex, ex.: #FF0000)" Class="mb-2" />
+        <MudNumericField @bind-Value="_value" Label="Value" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="2" Class="mb-2" />
+
+        @if (_editingScore is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CompetencyScoreDto>? _grid;
+    private IEnumerable<CompetencyScoreDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private CompetencyScoreDto? _editingScore;
+    private string _name = string.Empty;
+    private string _acronym = string.Empty;
+    private string _color = "#000000";
+    private int _value;
+    private string? _description;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CompetencyScoreApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(CompetencyScoreDto? score)
+    {
+        _editingScore = score;
+        _name = score?.Name ?? string.Empty;
+        _acronym = score?.Acronym ?? string.Empty;
+        _color = score?.Color ?? "#000000";
+        _value = score?.Value ?? 0;
+        _description = score?.Description;
+        _active = score?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingScore is null)
+            await CompetencyScoreApi.CreateAsync(new CreateCompetencyScoreDto(_name, _acronym, _color, _value, _description));
+        else
+            await CompetencyScoreApi.UpdateAsync(new UpdateCompetencyScoreDto(_editingScore.Id, _name, _acronym, _color, _value, _description, _active));
+
+        Snackbar.Add("Score saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(CompetencyScoreDto score)
+    {
+        await CompetencyScoreApi.DeleteAsync(score.Id);
+        Snackbar.Add("Score deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

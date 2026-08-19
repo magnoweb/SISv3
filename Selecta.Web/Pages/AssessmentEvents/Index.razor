@@ -1,0 +1,265 @@
+@page "/assessment-events"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject AssessmentEventApiClient AssessmentEventApi
+@inject CandidateApiClient CandidateApi
+@inject JobTitleApiClient JobTitleApi
+@inject ContactApiClient ContactApi
+@inject CityApiClient CityApi
+@inject EvaluationResultApiClient EvaluationResultApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Assessment Events</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Assessment Events</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde ao antigo "Evento de Avaliação" — dados do candidato/cargo/contato no momento da
+    avaliação, resultado e status. Histórico de produtividade, testes e anexos ficam fora do escopo
+    desta fase.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New assessment event
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/candidates">Candidate</MudLink> e um
+        <MudLink Href="/job-titles">Job Title</MudLink> cadastrados antes de criar uma avaliação.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="AssessmentEventDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Property="CandidateName" Title="Candidate" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Property="JobTitleName" Title="Job Title" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="140px" />
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Property="Status" Title="Status" Width="140px" />
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Property="Result" Title="Result" Width="180px" />
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Property="Purpose" Title="Purpose" Width="170px" />
+        <RadzenDataGridColumn TItem="AssessmentEventDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="evt">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(evt))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(evt))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Medium, FullWidth = true }">
+    <TitleContent>@(_editingEvent is null ? "New assessment event" : "Edit assessment event")</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Identification</MudText>
+        <RadzenDropDown TValue="Guid" @bind-Value="_candidateId" Data="@_candidates" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Candidate" Style="width:100%;" Class="mb-2" />
+        <RadzenDropDown TValue="Guid" @bind-Value="_jobTitleId" Data="@_jobTitles" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Job Title" Style="width:100%;" Class="mb-2" />
+        <RadzenDropDown TValue="Guid?" @bind-Value="_contactId" Data="@_contacts" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Contact (optional)" Style="width:100%;" Class="mb-2" />
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Personal information</MudText>
+        <MudSelect @bind-Value="_educationLevel" Label="Education level" Class="mb-2">
+            @foreach (var level in Enum.GetValues<EducationLevel>())
+            {
+                <MudSelectItem Value="level">@level</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_education" Label="Education (course/field)" Class="mb-2" />
+        <MudCheckBox @bind-Value="_educationCompleted" Label="Education completed" Class="mb-2" />
+        <MudSelect @bind-Value="_maritalStatus" Label="Marital status" Class="mb-2">
+            @foreach (var status in Enum.GetValues<MaritalStatus>())
+            {
+                <MudSelectItem Value="status">@status</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField @bind-Value="_driverLicenseNumber" Label="Driver license number" Class="mb-2" />
+        <MudSelect @bind-Value="_driverLicenseCategory" Label="Driver license category" Class="mb-2">
+            @foreach (var category in Enum.GetValues<DriverLicenseCategory>())
+            {
+                <MudSelectItem Value="category">@category</MudSelectItem>
+            }
+        </MudSelect>
+        <MudNumericField @bind-Value="_numberOfChildren" Label="Number of children" Class="mb-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Address &amp; contact</MudText>
+        <MudTextField @bind-Value="_address" Label="Address" Class="mb-2" />
+        <MudTextField @bind-Value="_addressComplement" Label="Complement" Class="mb-2" />
+        <MudTextField @bind-Value="_neighborhood" Label="Neighborhood" Class="mb-2" />
+        <RadzenDropDown TValue="Guid?" @bind-Value="_cityId" Data="@_cities" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="City" Style="width:100%;" Class="mb-2">
+            <Template Context="item">
+                @($"{item.Name} / {item.State}")
+            </Template>
+        </RadzenDropDown>
+        <MudTextField @bind-Value="_postalCode" Label="Postal code" Class="mb-2" />
+        <MudTextField @bind-Value="_phone1" Label="Phone" Class="mb-2" />
+        <MudTextField @bind-Value="_email" Label="Email" Class="mb-4" />
+
+        @if (_editingEvent is not null)
+        {
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Result &amp; status</MudText>
+            <MudSelect @bind-Value="_status" Label="Status" Class="mb-2">
+                @foreach (var status in Enum.GetValues<AssessmentStatus>())
+                {
+                    <MudSelectItem Value="status">@status</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect @bind-Value="_result" Label="Result" Class="mb-2">
+                @foreach (var result in Enum.GetValues<AssessmentResult>())
+                {
+                    <MudSelectItem Value="result">@result</MudSelectItem>
+                }
+            </MudSelect>
+            <RadzenDropDown TValue="Guid?" @bind-Value="_evaluationResultId" Data="@_evaluationResults" TextProperty="Name" ValueProperty="Id"
+                            AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Evaluation result label (optional)" Style="width:100%;" Class="mb-2" />
+            <MudDatePicker @bind-Date="_completedAt" Label="Completed at" Class="mb-2" />
+        }
+
+        <MudSelect @bind-Value="_purpose" Label="Purpose">
+            @foreach (var purpose in Enum.GetValues<AssessmentPurpose>())
+            {
+                <MudSelectItem Value="purpose">@purpose</MudSelectItem>
+            }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<AssessmentEventDto>? _grid;
+    private IEnumerable<AssessmentEventDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<CandidateDto>? _candidates;
+    private List<JobTitleDto>? _jobTitles;
+    private List<ContactDto>? _contacts;
+    private List<CityDto>? _cities;
+    private List<EvaluationResultDto>? _evaluationResults;
+
+    private bool CanCreate => _candidates is { Count: > 0 } && _jobTitles is { Count: > 0 };
+
+    private bool _showForm;
+    private AssessmentEventDto? _editingEvent;
+
+    private Guid _candidateId;
+    private Guid _jobTitleId;
+    private Guid? _contactId;
+    private DateTime? _date = DateTime.Today;
+    private EducationLevel _educationLevel = EducationLevel.NotInformed;
+    private string? _education;
+    private bool _educationCompleted;
+    private MaritalStatus _maritalStatus = MaritalStatus.NotInformed;
+    private string? _driverLicenseNumber;
+    private DriverLicenseCategory _driverLicenseCategory = DriverLicenseCategory.NotInformed;
+    private int? _numberOfChildren;
+    private string? _address;
+    private string? _addressComplement;
+    private string? _neighborhood;
+    private Guid? _cityId;
+    private string? _postalCode;
+    private string? _phone1;
+    private string? _email;
+    private AssessmentResult _result = AssessmentResult.NoResult;
+    private Guid? _evaluationResultId;
+    private AssessmentStatus _status = AssessmentStatus.NotStarted;
+    private AssessmentPurpose _purpose = AssessmentPurpose.NotInformed;
+    private DateTime? _completedAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _candidates = await CandidateApi.GetAllAsync();
+        _jobTitles = await JobTitleApi.GetAllAsync();
+        _contacts = await ContactApi.GetAllAsync();
+        _cities = await CityApi.GetAllAsync();
+        _evaluationResults = await EvaluationResultApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await AssessmentEventApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(AssessmentEventDto? evt)
+    {
+        _editingEvent = evt;
+        _candidateId = evt?.CandidateId ?? _candidates?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _jobTitleId = evt?.JobTitleId ?? _jobTitles?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _contactId = evt?.ContactId;
+        _date = evt?.Date ?? DateTime.Today;
+        _educationLevel = evt?.EducationLevel ?? EducationLevel.NotInformed;
+        _education = evt?.Education;
+        _educationCompleted = evt?.EducationCompleted ?? false;
+        _maritalStatus = evt?.MaritalStatus ?? MaritalStatus.NotInformed;
+        _driverLicenseNumber = evt?.DriverLicenseNumber;
+        _driverLicenseCategory = evt?.DriverLicenseCategory ?? DriverLicenseCategory.NotInformed;
+        _numberOfChildren = evt?.NumberOfChildren;
+        _address = evt?.Address;
+        _addressComplement = evt?.AddressComplement;
+        _neighborhood = evt?.Neighborhood;
+        _cityId = evt?.CityId;
+        _postalCode = evt?.PostalCode;
+        _phone1 = evt?.Phone1;
+        _email = evt?.Email;
+        _result = evt?.Result ?? AssessmentResult.NoResult;
+        _evaluationResultId = evt?.EvaluationResultId;
+        _status = evt?.Status ?? AssessmentStatus.NotStarted;
+        _purpose = evt?.Purpose ?? AssessmentPurpose.NotInformed;
+        _completedAt = evt?.CompletedAt;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_date is null) return;
+
+        if (_editingEvent is null)
+        {
+            await AssessmentEventApi.CreateAsync(new CreateAssessmentEventDto(
+                _candidateId, _jobTitleId, _contactId, _date.Value,
+                _educationLevel, _education, _educationCompleted, _maritalStatus,
+                _driverLicenseNumber, _driverLicenseCategory, _numberOfChildren,
+                _address, _addressComplement, _neighborhood, null, null, _postalCode,
+                _phone1, null, _email, _cityId, _purpose));
+        }
+        else
+        {
+            await AssessmentEventApi.UpdateAsync(new UpdateAssessmentEventDto(
+                _editingEvent.Id, _candidateId, _jobTitleId, _contactId, _date.Value,
+                _educationLevel, _education, _educationCompleted, _maritalStatus,
+                _driverLicenseNumber, _driverLicenseCategory, _numberOfChildren,
+                _address, _addressComplement, _neighborhood, null, null, _postalCode,
+                _phone1, null, _email, _cityId,
+                _result, _evaluationResultId, _status, _purpose, _completedAt));
+        }
+
+        Snackbar.Add("Assessment event saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(AssessmentEventDto evt)
+    {
+        await AssessmentEventApi.DeleteAsync(evt.Id);
+        Snackbar.Add("Assessment event deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

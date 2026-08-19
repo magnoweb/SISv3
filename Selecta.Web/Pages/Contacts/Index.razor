@@ -1,0 +1,150 @@
+@page "/contacts"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject ContactApiClient ContactApi
+@inject CompanyApiClient CompanyApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Contacts</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Contacts</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="_companies is null || _companies.Count == 0">
+    New contact
+</MudButton>
+
+@if (_companies is not null && _companies.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Cria pelo menos uma <MudLink Href="/companies">Company</MudLink> antes de adicionar contactos.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="ContactDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ContactDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ContactDto" Property="CompanyId" Title="Company" Sortable="false" Filterable="false">
+            <Template Context="contact">@CompanyName(contact.CompanyId)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ContactDto" Property="Email" Title="Email" />
+        <RadzenDataGridColumn TItem="ContactDto" Property="Position" Title="Position" Width="160px" />
+        <RadzenDataGridColumn TItem="ContactDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="ContactDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="contact">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(contact))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(contact))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingContact is null ? "New contact" : "Edit contact")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_companyId" Data="@_companies" TextProperty="TradeName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Company" Style="width:100%;" Class="mb-2" />
+
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+
+        <MudSelect @bind-Value="_gender" Label="Gender" Class="mb-2">
+            <MudSelectItem Value="Gender.Female">Female</MudSelectItem>
+            <MudSelectItem Value="Gender.Male">Male</MudSelectItem>
+        </MudSelect>
+
+        <MudTextField @bind-Value="_position" Label="Position" Class="mb-2" />
+        <MudTextField @bind-Value="_email" Label="Email" Class="mb-2" />
+        <MudTextField @bind-Value="_phone1" Label="Phone" Class="mb-2" />
+        <MudCheckBox @bind-Value="_receiveNotifications" Label="Receive notifications" Class="mb-2" />
+
+        @if (_editingContact is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ContactDto>? _grid;
+    private IEnumerable<ContactDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<CompanyDto>? _companies;
+
+    private bool _showForm;
+    private ContactDto? _editingContact;
+    private Guid _companyId;
+    private string _name = string.Empty;
+    private Gender _gender = Gender.Female;
+    private string? _position;
+    private string _email = string.Empty;
+    private string? _phone1;
+    private bool _receiveNotifications;
+    private bool _active = true;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync() => _companies = await CompanyApi.GetAllAsync();
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ContactApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private string CompanyName(Guid companyId) =>
+        _companies?.FirstOrDefault(c => c.Id == companyId)?.TradeName ?? companyId.ToString();
+
+    private void OpenForm(ContactDto? contact)
+    {
+        _formError = null;
+        _editingContact = contact;
+        _companyId = contact?.CompanyId ?? _companies?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _name = contact?.Name ?? string.Empty;
+        _gender = contact?.Gender ?? Gender.Female;
+        _position = contact?.Position;
+        _email = contact?.Email ?? string.Empty;
+        _phone1 = contact?.Phone1;
+        _receiveNotifications = contact?.ReceiveNotifications ?? false;
+        _active = contact?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_editingContact is null)
+            await ContactApi.CreateAsync(new CreateContactDto(_companyId, _name, _gender, _position, _phone1, null, _email, null, null, null, _receiveNotifications));
+        else
+            await ContactApi.UpdateAsync(new UpdateContactDto(_editingContact.Id, _companyId, _name, _gender, _position, _phone1, null, _email, null, null, null, _receiveNotifications, _active));
+
+        Snackbar.Add("Contact saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ContactDto contact)
+    {
+        await ContactApi.DeleteAsync(contact.Id);
+        Snackbar.Add("Contact deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

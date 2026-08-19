@@ -1,0 +1,163 @@
+@page "/"
+@attribute [Authorize]
+@inject DashboardApiClient DashboardApi
+
+<PageTitle>SIS . Sistema Integrado Selecta</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
+
+@if (_summary is null)
+{
+    <MudProgressCircular Indeterminate="true" Class="mb-4" />
+}
+else
+{
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="2" Style="height:100%;">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Aniversariantes de hoje</MudText>
+                @if (_summary.BirthdaysToday.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">Sem aniversariantes hoje.</MudAlert>
+                }
+                else
+                {
+                    @foreach (var birthday in _summary.BirthdaysToday)
+                    {
+                        <div class="mb-1">
+                            <MudText Typo="Typo.body2">@birthday.ContactName</MudText>
+                            @if (!string.IsNullOrWhiteSpace(birthday.CompanyName))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Default">@birthday.CompanyName</MudText>
+                            }
+                        </div>
+                    }
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="2" Style="height:100%;">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Avaliações</MudText>
+                <MudGrid>
+                    <MudItem xs="4" Class="text-center">
+                        <MudText Typo="Typo.h5">@_summary.AssessmentEventsToday</MudText>
+                        <MudText Typo="Typo.caption">Dia</MudText>
+                    </MudItem>
+                    <MudItem xs="4" Class="text-center">
+                        <MudText Typo="Typo.h5">@_summary.AssessmentEventsThisMonth</MudText>
+                        <MudText Typo="Typo.caption">Mês</MudText>
+                    </MudItem>
+                    <MudItem xs="4" Class="text-center">
+                        <MudText Typo="Typo.h5">@_summary.AssessmentEventsThisYear</MudText>
+                        <MudText Typo="Typo.caption">Ano</MudText>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" md="8">
+            <MudPaper Class="pa-4" Elevation="2">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Avaliações no último ano</MudText>
+                <RadzenChart>
+                    <RadzenColumnSeries TItem="ChartPoint" Data="@_chartData" CategoryProperty="Label" ValueProperty="Count" Title="Avaliações" Fill="#E8590C" />
+                </RadzenChart>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="4">
+            <MudPaper Class="pa-4" Elevation="2" Style="height:100%;">
+                <MudText Typo="Typo.subtitle1" Class="mb-3">Resultado</MudText>
+                @{
+                    var totalResults = _summary.AdvisableCount + _summary.AdvisableWithRestrictionsCount + _summary.NotAdvisableCount;
+                }
+                <ResultBar Label="Aconselháveis" Count="@_summary.AdvisableCount" Total="@totalResults" Color="Color.Success" />
+                <ResultBar Label="Aconselháveis/Restrição" Count="@_summary.AdvisableWithRestrictionsCount" Total="@totalResults" Color="Color.Warning" />
+                <ResultBar Label="Desaconselháveis" Count="@_summary.NotAdvisableCount" Total="@totalResults" Color="Color.Error" />
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid Class="mb-6">
+        <MudItem xs="12" sm="6" md="4" lg="2">
+            <SummaryCard Label="Candidates" Value="@_summary.TotalCandidates" Icon="@Icons.Material.Filled.People" Color="Color.Primary" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4" lg="2">
+            <SummaryCard Label="Active companies" Value="@_summary.ActiveCompanies" Icon="@Icons.Material.Filled.Business" Color="Color.Info" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4" lg="2">
+            <SummaryCard Label="Active job openings" Value="@_summary.ActiveJobOpenings" Icon="@Icons.Material.Filled.Work" Color="Color.Success" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4" lg="2">
+            <SummaryCard Label="Pending proposals" Value="@_summary.PendingProposals" Icon="@Icons.Material.Filled.RequestQuote" Color="Color.Warning" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4" lg="2">
+            <SummaryCard Label="Assessment events" Value="@_summary.TotalAssessmentEvents" Icon="@Icons.Material.Filled.FactCheck" Color="Color.Secondary" />
+        </MudItem>
+        <MudItem xs="12" sm="6" md="4" lg="2">
+            <SummaryCard Label="Reports" Value="@_summary.TotalReports" Icon="@Icons.Material.Filled.Summarize" Color="Color.Dark" />
+        </MudItem>
+    </MudGrid>
+}
+
+<MudText Typo="Typo.body1">
+    Usa o menu à esquerda para navegar pelos módulos já disponíveis: <MudLink Href="/cities">Cities</MudLink>,
+    <MudLink Href="/candidates">Candidates</MudLink>,
+    <MudLink Href="/job-openings">Job Openings</MudLink>,
+    <MudLink Href="/companies">Companies</MudLink>,
+    <MudLink Href="/contacts">Contacts</MudLink>,
+    <MudLink Href="/job-titles">Job Titles</MudLink>,
+    <MudLink Href="/recruitment-stages">Recruitment Stages</MudLink>,
+    <MudLink Href="/evaluation-results">Evaluation Results</MudLink>,
+    <MudLink Href="/company-evaluation-results">Company Evaluation Results</MudLink>,
+    <MudLink Href="/service-offerings">Service Offerings</MudLink>,
+    <MudLink Href="/prospect-companies">Prospect Companies</MudLink>,
+    <MudLink Href="/proposals">Proposals</MudLink>,
+    <MudLink Href="/schedule-blocks">Schedule Blocks</MudLink>,
+    <MudLink Href="/professional-groups">Professional Groups</MudLink>,
+    <MudLink Href="/activities">Activities</MudLink>,
+    <MudLink Href="/report-components">Report Components</MudLink>,
+    <MudLink Href="/report-templates">Report Templates</MudLink>,
+    <MudLink Href="/assessment-events">Assessment Events</MudLink>,
+    <MudLink Href="/reports">Reports</MudLink>,
+    <MudLink Href="/productivity-entries">Productivity Entries</MudLink>,
+    <MudLink Href="/collaborators">Collaborators</MudLink>,
+    <MudLink Href="/access-profiles">Access Profiles</MudLink>,
+    <MudLink Href="/competencies">Competencies</MudLink>,
+    <MudLink Href="/competency-descriptors">Competency Descriptors</MudLink>,
+    <MudLink Href="/competency-scores">Competency Scores</MudLink>,
+    <MudLink Href="/competency-score-descriptors">Competency Score Descriptors</MudLink>,
+    <MudLink Href="/report-competencies">Report Competencies</MudLink>,
+    <MudLink Href="/job-title-competency-profiles">Job Title Competency Profiles</MudLink>,
+    <MudLink Href="/professional-group-competency-profiles">Professional Group Competency Profiles</MudLink>,
+    <MudLink Href="/competency-profile-lines">Competency Profile Lines</MudLink>,
+    <MudLink Href="/psychological-tests">Psychological Tests</MudLink>,
+    <MudLink Href="/assessment-event-tests">Assessment Event Tests</MudLink>,
+    <MudLink Href="/report-template-components">Report Template Components</MudLink>,
+    <MudLink Href="/opinion-lists">Opinion Lists</MudLink>,
+    <MudLink Href="/opinion-list-entries">Opinion List Entries</MudLink>,
+    <MudLink Href="/recruitment-schedules">Recruitment Schedules</MudLink>,
+    <MudLink Href="/selection-schedules">Selection Schedules</MudLink> e
+    <MudLink Href="/schedule-notes">Schedule Notes</MudLink>.
+    Seguem o mesmo padrão a copiar para migrar os restantes módulos.
+</MudText>
+
+@code {
+    private DashboardSummaryDto? _summary;
+    private List<ChartPoint> _chartData = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _summary = await DashboardApi.GetSummaryAsync();
+        if (_summary is not null)
+        {
+            _chartData = _summary.AssessmentEventsLast12Months
+                .Select(m => new ChartPoint($"{m.Month}/{m.Year}", m.Count))
+                .ToList();
+        }
+    }
+
+    private sealed record ChartPoint(string Label, int Count);
+}

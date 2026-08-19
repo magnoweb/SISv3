@@ -1,0 +1,127 @@
+@page "/prospect-companies"
+@attribute [Authorize]
+@inject ProspectCompanyApiClient ProspectCompanyApi
+@inject CompanyApiClient CompanyApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Prospect Companies</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Prospect Companies</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Empresas ainda não efetivadas como <MudLink Href="/companies">Company</MudLink>, usadas para enviar
+    <MudLink Href="/proposals">Proposals</MudLink> comerciais antes do onboarding completo.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New prospect
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="ProspectCompanyDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ProspectCompanyDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="ProspectCompanyDto" Property="Document" Title="Document" Width="160px" />
+        <RadzenDataGridColumn TItem="ProspectCompanyDto" Property="CompanyId" Title="Linked company" Sortable="false" Filterable="false">
+            <Template Context="prospect">@(prospect.CompanyId is null ? "—" : CompanyName(prospect.CompanyId.Value))</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="ProspectCompanyDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="prospect">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(prospect))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(prospect))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingProspect is null ? "New prospect" : "Edit prospect")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_document" Label="Document" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_companyId" Data="@_companies" TextProperty="TradeName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Linked company (optional)" Style="width:100%;" />
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ProspectCompanyDto>? _grid;
+    private IEnumerable<ProspectCompanyDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<CompanyDto>? _companies;
+
+    private bool _showForm;
+    private ProspectCompanyDto? _editingProspect;
+    private string _name = string.Empty;
+    private string _document = string.Empty;
+    private Guid? _companyId;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync() => _companies = await CompanyApi.GetAllAsync();
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ProspectCompanyApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private string CompanyName(Guid companyId) =>
+        _companies?.FirstOrDefault(c => c.Id == companyId)?.TradeName ?? companyId.ToString();
+
+    private void OpenForm(ProspectCompanyDto? prospect)
+    {
+        _formError = null;
+        _editingProspect = prospect;
+        _name = prospect?.Name ?? string.Empty;
+        _document = prospect?.Document ?? string.Empty;
+        _companyId = prospect?.CompanyId;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        try
+        {
+            if (_editingProspect is null)
+                await ProspectCompanyApi.CreateAsync(new CreateProspectCompanyDto(_companyId, _name, _document));
+            else
+                await ProspectCompanyApi.UpdateAsync(new UpdateProspectCompanyDto(_editingProspect.Id, _companyId, _name, _document));
+
+            Snackbar.Add("Prospect saved.", Severity.Success);
+            _showForm = false;
+            await ReloadGridAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(ProspectCompanyDto prospect)
+    {
+        await ProspectCompanyApi.DeleteAsync(prospect.Id);
+        Snackbar.Add("Prospect deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

@@ -1,0 +1,14 @@
+<MudPaper Class="pa-4 d-flex align-center gap-3" Elevation="2">
+    <MudIcon Icon="@Icon" Color="@Color" Size="Size.Large" />
+    <div>
+        <MudText Typo="Typo.h5">@Value</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Default">@Label</MudText>
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public int Value { get; set; }
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+    [Parameter] public Color Color { get; set; } = Color.Primary;
+}

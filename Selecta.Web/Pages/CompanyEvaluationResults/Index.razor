@@ -1,0 +1,136 @@
+@page "/company-evaluation-results"
+@attribute [Authorize]
+@inject CompanyEvaluationResultApiClient CompanyEvaluationResultApi
+@inject CompanyApiClient CompanyApi
+@inject EvaluationResultApiClient EvaluationResultApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Company Evaluation Results</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Company Evaluation Results</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Nomes customizados que uma empresa usa para um resultado de avaliação do catálogo base
+    (ver <MudLink Href="/evaluation-results">Evaluation Results</MudLink>).
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New override
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos uma <MudLink Href="/companies">Company</MudLink> e um
+        <MudLink Href="/evaluation-results">Evaluation Result</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="CompanyEvaluationResultDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CompanyEvaluationResultDto" Property="CompanyId" Title="Company" Sortable="false" Filterable="false">
+            <Template Context="result">@CompanyName(result.CompanyId)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="CompanyEvaluationResultDto" Property="EvaluationResultId" Title="Base result" Sortable="false" Filterable="false">
+            <Template Context="result">@EvaluationResultName(result.EvaluationResultId)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn TItem="CompanyEvaluationResultDto" Property="Name" Title="Custom name" />
+        <RadzenDataGridColumn TItem="CompanyEvaluationResultDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="result">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(result))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(result))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingResult is null ? "New override" : "Edit override")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_companyId" Data="@_companies" TextProperty="TradeName" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Company" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_evaluationResultId" Data="@_evaluationResults" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Base result" Style="width:100%;" Class="mb-2" />
+
+        <MudTextField @bind-Value="_name" Label="Custom name" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CompanyEvaluationResultDto>? _grid;
+    private IEnumerable<CompanyEvaluationResultDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private List<CompanyDto>? _companies;
+    private List<EvaluationResultDto>? _evaluationResults;
+    private bool _referenceDataLoaded;
+
+    private bool CanCreate => _companies is { Count: > 0 } && _evaluationResults is { Count: > 0 };
+
+    private bool _showForm;
+    private CompanyEvaluationResultDto? _editingResult;
+    private Guid _companyId;
+    private Guid _evaluationResultId;
+    private string _name = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companies = await CompanyApi.GetAllAsync();
+        _evaluationResults = await EvaluationResultApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CompanyEvaluationResultApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private string CompanyName(Guid companyId) =>
+        _companies?.FirstOrDefault(c => c.Id == companyId)?.TradeName ?? companyId.ToString();
+
+    private string EvaluationResultName(Guid evaluationResultId) =>
+        _evaluationResults?.FirstOrDefault(r => r.Id == evaluationResultId)?.Name ?? evaluationResultId.ToString();
+
+    private void OpenForm(CompanyEvaluationResultDto? result)
+    {
+        _editingResult = result;
+        _companyId = result?.CompanyId ?? _companies?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _evaluationResultId = result?.EvaluationResultId ?? _evaluationResults?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _name = result?.Name ?? string.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingResult is null)
+            await CompanyEvaluationResultApi.CreateAsync(new CreateCompanyEvaluationResultDto(_evaluationResultId, _companyId, _name));
+        else
+            await CompanyEvaluationResultApi.UpdateAsync(new UpdateCompanyEvaluationResultDto(_editingResult.Id, _evaluationResultId, _companyId, _name));
+
+        Snackbar.Add("Override saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(CompanyEvaluationResultDto result)
+    {
+        await CompanyEvaluationResultApi.DeleteAsync(result.Id);
+        Snackbar.Add("Override deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

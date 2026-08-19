@@ -1,0 +1,189 @@
+@page "/selection-schedules"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
+@using Selecta.Core.Entities.Enums
+@inject SelectionScheduleApiClient SelectionScheduleApi
+@inject JobTitleApiClient JobTitleApi
+@inject ContactApiClient ContactApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Selection Schedules</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Selection Schedules</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde à "Agenda de Seleção" da v2 — avaliações agendadas para um
+    <MudLink Href="/job-titles">Job Title</MudLink>.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New schedule
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/job-titles">Job Title</MudLink> cadastrado.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="SelectionScheduleDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="SelectionScheduleDto" Property="Name" Title="Candidate" />
+        <RadzenDataGridColumn TItem="SelectionScheduleDto" Property="JobTitleName" Title="Job Title" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="SelectionScheduleDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="130px" />
+        <RadzenDataGridColumn TItem="SelectionScheduleDto" Property="Status" Title="Status" Width="130px" />
+        <RadzenDataGridColumn TItem="SelectionScheduleDto" Property="HasHistory" Title="History" Width="100px" />
+        <RadzenDataGridColumn TItem="SelectionScheduleDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="item">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(item))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(item))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true, MaxWidth = MaxWidth.Small, FullWidth = true }">
+    <TitleContent>@(_editingItem is null ? "New schedule" : "Edit schedule")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_jobTitleId" Data="@_jobTitles" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Job Title" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid?" @bind-Value="_contactId" Data="@_contacts" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" AllowClear="true" Placeholder="Solicitante / Contact (optional)" Style="width:100%;" Class="mb-2" />
+
+        <MudTextField @bind-Value="_name" Label="Candidate name" Class="mb-2" />
+        <MudTextField @bind-Value="_cpf" Label="CPF (optional)" Class="mb-2" />
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-2" />
+        <MudTimePicker @bind-Time="_time" Label="Time" Class="mb-2" />
+
+        <MudSelect @bind-Value="_origin" Label="Origin" Class="mb-2">
+            @foreach (var origin in Enum.GetValues<ServiceOrigin>())
+            {
+                <MudSelectItem Value="origin">@origin</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_editingItem is not null)
+        {
+            <MudSelect @bind-Value="_status" Label="Status" Class="mb-2">
+                @foreach (var status in Enum.GetValues<ScheduleStatus>())
+                {
+                    <MudSelectItem Value="status">@status</MudSelectItem>
+                }
+            </MudSelect>
+        }
+
+        <MudTextField @bind-Value="_internalNotes" Label="Observações (internal)" Lines="2" Class="mb-2" />
+        <MudTextField @bind-Value="_clientNotes" Label="Observações do Cliente (client)" Lines="2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<SelectionScheduleDto>? _grid;
+    private IEnumerable<SelectionScheduleDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<JobTitleDto>? _jobTitles;
+    private List<ContactDto>? _contacts;
+
+    private bool CanCreate => _jobTitles is { Count: > 0 };
+
+    private bool _showForm;
+    private SelectionScheduleDto? _editingItem;
+    private Guid _jobTitleId;
+    private Guid? _contactId;
+    private string _name = string.Empty;
+    private string? _cpf;
+    private DateTime? _date = DateTime.Today;
+    private TimeSpan? _time;
+    private ServiceOrigin _origin = ServiceOrigin.General;
+    private ScheduleStatus _status = ScheduleStatus.Pending;
+    private string? _internalNotes;
+    private string? _clientNotes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _jobTitles = await JobTitleApi.GetAllAsync();
+        _contacts = await ContactApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await SelectionScheduleApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(SelectionScheduleDto? item)
+    {
+        _editingItem = item;
+        _jobTitleId = item?.JobTitleId ?? _jobTitles?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _contactId = item?.ContactId;
+        _name = item?.Name ?? string.Empty;
+        _cpf = item?.Cpf;
+        _date = item?.Date ?? DateTime.Today;
+        _time = item?.Time;
+        _origin = item?.Origin ?? ServiceOrigin.General;
+        _status = item?.Status ?? ScheduleStatus.Pending;
+        _internalNotes = item?.InternalNotes;
+        _clientNotes = item?.ClientNotes;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_date is null || _time is null) return;
+
+        if (_editingItem is null)
+        {
+            var createdById = await GetCurrentUserIdAsync();
+            if (createdById is null) return;
+
+            await SelectionScheduleApi.CreateAsync(new CreateSelectionScheduleDto(
+                _jobTitleId, _contactId, _origin, _clientNotes,
+                _name, _cpf, _date.Value, _time.Value, _internalNotes, createdById.Value));
+        }
+        else
+        {
+            await SelectionScheduleApi.UpdateAsync(new UpdateSelectionScheduleDto(
+                _editingItem.Id, _editingItem.AssessmentEventId, _jobTitleId, _contactId, _origin, _clientNotes,
+                _name, _cpf, _date.Value, _time.Value, _status, _internalNotes));
+        }
+
+        Snackbar.Add("Schedule saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private async Task DeleteAsync(SelectionScheduleDto item)
+    {
+        await SelectionScheduleApi.DeleteAsync(item.Id);
+        Snackbar.Add("Schedule deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

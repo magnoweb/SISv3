@@ -1,0 +1,48 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="SelectaTheme.Theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<RadzenDialog />
+<RadzenNotification />
+<RadzenContextMenu />
+<RadzenTooltip />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@(() => _drawerAberto = !_drawerAberto)" />
+        <MudText Typo="Typo.h6" Class="ml-2">SIS . Sistema Integrado Selecta</MudText>
+        <MudSpacer />
+        <AuthorizeView>
+            <Authorized>
+                <MudText Class="mr-4">@context.User.FindFirst("name")?.Value</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="LogoutAsync" />
+            </Authorized>
+        </AuthorizeView>
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerAberto" Elevation="2">
+        <NavMenu />
+    </MudDrawer>
+
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="my-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerAberto = true;
+
+    [Inject] private JwtAuthenticationStateProvider AuthProvider { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private async Task LogoutAsync()
+    {
+        await AuthProvider.NotifyLogoutAsync();
+        Navigation.NavigateTo("/login", forceLoad: false);
+    }
+}

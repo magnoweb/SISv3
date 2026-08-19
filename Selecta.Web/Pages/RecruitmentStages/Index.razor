@@ -1,0 +1,106 @@
+@page "/recruitment-stages"
+@attribute [Authorize]
+@inject RecruitmentStageApiClient RecruitmentStageApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Recruitment Stages</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Recruitment Stages</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New stage
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="RecruitmentStageDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="RecruitmentStageDto" Property="Order" Title="Order" Width="100px" />
+        <RadzenDataGridColumn TItem="RecruitmentStageDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="RecruitmentStageDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="RecruitmentStageDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="stage">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(stage))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(stage))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingStage is null ? "New stage" : "Edit stage")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="2" Class="mb-2" />
+        <MudTextField @bind-Value="_cssClass" Label="CSS class" Class="mb-2" />
+        <MudNumericField @bind-Value="_order" Label="Order" Class="mb-2" />
+
+        @if (_editingStage is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<RecruitmentStageDto>? _grid;
+    private IEnumerable<RecruitmentStageDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private RecruitmentStageDto? _editingStage;
+    private string _name = string.Empty;
+    private string? _description;
+    private string? _cssClass;
+    private int _order;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await RecruitmentStageApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(RecruitmentStageDto? stage)
+    {
+        _editingStage = stage;
+        _name = stage?.Name ?? string.Empty;
+        _description = stage?.Description;
+        _cssClass = stage?.CssClass;
+        _order = stage?.Order ?? _count;
+        _active = stage?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingStage is null)
+            await RecruitmentStageApi.CreateAsync(new CreateRecruitmentStageDto(_name, _description, _cssClass, _order));
+        else
+            await RecruitmentStageApi.UpdateAsync(new UpdateRecruitmentStageDto(_editingStage.Id, _name, _description, _cssClass, _order, _active));
+
+        Snackbar.Add("Stage saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(RecruitmentStageDto stage)
+    {
+        await RecruitmentStageApi.DeleteAsync(stage.Id);
+        Snackbar.Add("Stage deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

@@ -1,0 +1,121 @@
+@page "/report-template-components"
+@attribute [Authorize]
+@inject ReportTemplateComponentApiClient ReportTemplateComponentApi
+@inject ReportTemplateApiClient ReportTemplateApi
+@inject ReportComponentApiClient ReportComponentApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Report Template Components</PageTitle>
+<MudText Typo="Typo.h4" Class="mb-4">Report Template Components</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Componentes extra do corpo de um <MudLink Href="/report-templates">Report Template</MudLink>, além de
+    cabeçalho/rodapé.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New link
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/report-templates">Report Template</MudLink> e um
+        <MudLink Href="/report-components">Report Component</MudLink> cadastrados.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="ReportTemplateComponentDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="ReportTemplateComponentDto" Property="ReportTemplateName" Title="Template" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportTemplateComponentDto" Property="ReportComponentName" Title="Component" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="ReportTemplateComponentDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="item">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(item))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(item))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingItem is null ? "New link" : "Edit link")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="int" @bind-Value="_reportTemplateId" Data="@_reportTemplates" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Report Template" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_reportComponentId" Data="@_reportComponents" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Report Component" Style="width:100%;" Class="mb-2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<ReportTemplateComponentDto>? _grid;
+    private IEnumerable<ReportTemplateComponentDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<ReportTemplateDto>? _reportTemplates;
+    private List<ReportComponentDto>? _reportComponents;
+
+    private bool CanCreate => _reportTemplates is { Count: > 0 } && _reportComponents is { Count: > 0 };
+
+    private bool _showForm;
+    private ReportTemplateComponentDto? _editingItem;
+    private int _reportTemplateId;
+    private Guid _reportComponentId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _reportTemplates = await ReportTemplateApi.GetAllAsync();
+        _reportComponents = await ReportComponentApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await ReportTemplateComponentApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(ReportTemplateComponentDto? item)
+    {
+        _editingItem = item;
+        _reportTemplateId = item?.ReportTemplateId ?? _reportTemplates?.FirstOrDefault()?.Id ?? 0;
+        _reportComponentId = item?.ReportComponentId ?? _reportComponents?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingItem is null)
+            await ReportTemplateComponentApi.CreateAsync(new CreateReportTemplateComponentDto(_reportTemplateId, _reportComponentId));
+        else
+            await ReportTemplateComponentApi.UpdateAsync(new UpdateReportTemplateComponentDto(_editingItem.Id, _reportTemplateId, _reportComponentId));
+
+        Snackbar.Add("Link saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(ReportTemplateComponentDto item)
+    {
+        await ReportTemplateComponentApi.DeleteAsync(item.Id);
+        Snackbar.Add("Link deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

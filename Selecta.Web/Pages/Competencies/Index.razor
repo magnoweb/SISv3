@@ -1,0 +1,110 @@
+@page "/competencies"
+@attribute [Authorize]
+@using Selecta.Core.Entities.Enums
+@inject CompetencyApiClient CompetencyApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Competencies</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Competencies</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New competency
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="CompetencyDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CompetencyDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="CompetencyDto" Property="Group" Title="Group" Width="150px" />
+        <RadzenDataGridColumn TItem="CompetencyDto" Property="Active" Title="Active" Width="100px" />
+        <RadzenDataGridColumn TItem="CompetencyDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="competency">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(competency))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(competency))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingCompetency is null ? "New competency" : "Edit competency")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_description" Label="Description" Lines="2" Class="mb-2" />
+
+        <MudSelect @bind-Value="_group" Label="Group" Class="mb-2">
+            @foreach (var group in Enum.GetValues<CompetencyGroup>())
+            {
+                <MudSelectItem Value="group">@group</MudSelectItem>
+            }
+        </MudSelect>
+
+        @if (_editingCompetency is not null)
+        {
+            <MudCheckBox @bind-Value="_active" Label="Active" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CompetencyDto>? _grid;
+    private IEnumerable<CompetencyDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private CompetencyDto? _editingCompetency;
+    private string _name = string.Empty;
+    private string? _description;
+    private CompetencyGroup _group = CompetencyGroup.Undefined;
+    private bool _active = true;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CompetencyApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(CompetencyDto? competency)
+    {
+        _editingCompetency = competency;
+        _name = competency?.Name ?? string.Empty;
+        _description = competency?.Description;
+        _group = competency?.Group ?? CompetencyGroup.Undefined;
+        _active = competency?.Active ?? true;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingCompetency is null)
+            await CompetencyApi.CreateAsync(new CreateCompetencyDto(_group, _name, _description));
+        else
+            await CompetencyApi.UpdateAsync(new UpdateCompetencyDto(_editingCompetency.Id, _group, _name, _description, _active));
+
+        Snackbar.Add("Competency saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(CompetencyDto competency)
+    {
+        await CompetencyApi.DeleteAsync(competency.Id);
+        Snackbar.Add("Competency deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

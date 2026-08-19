@@ -1,0 +1,96 @@
+@page "/cities"
+@attribute [Authorize]
+@inject CityApiClient CityApi
+@inject ISnackbar Snackbar
+
+<PageTitle>Cities</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Cities</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))">
+    New city
+</MudButton>
+
+<RadzenDataGrid @ref="_grid" TItem="CityDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="CityDto" Property="Code" Title="Code" Width="120px" />
+        <RadzenDataGridColumn TItem="CityDto" Property="Name" Title="Name" />
+        <RadzenDataGridColumn TItem="CityDto" Property="State" Title="State" Width="120px" />
+        <RadzenDataGridColumn TItem="CityDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="city">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(city))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(city))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingCity is null ? "New city" : "Edit city")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_code" Label="Code" T="int" Class="mb-2" />
+        <MudTextField @bind-Value="_name" Label="Name" Class="mb-2" />
+        <MudTextField @bind-Value="_state" Label="State" MaxLength="2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<CityDto>? _grid;
+    private IEnumerable<CityDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+
+    private bool _showForm;
+    private CityDto? _editingCity;
+    private int _code;
+    private string _name = string.Empty;
+    private string _state = string.Empty;
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await CityApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(CityDto? city)
+    {
+        _editingCity = city;
+        _code = city?.Code ?? 0;
+        _name = city?.Name ?? string.Empty;
+        _state = city?.State ?? string.Empty;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        if (_editingCity is null)
+            await CityApi.CreateAsync(new CreateCityDto(_code, _name, _state));
+        else
+            await CityApi.UpdateAsync(new UpdateCityDto(_editingCity.Id, _code, _name, _state));
+
+        Snackbar.Add("City saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task DeleteAsync(CityDto city)
+    {
+        await CityApi.DeleteAsync(city.Id);
+        Snackbar.Add("City deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}

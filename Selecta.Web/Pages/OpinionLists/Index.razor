@@ -1,0 +1,161 @@
+@page "/opinion-lists"
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Components.Authorization
+@inject OpinionListApiClient OpinionListApi
+@inject ContactApiClient ContactApi
+@inject UserApiClient UserApi
+@inject AuthenticationStateProvider AuthStateProvider
+@inject ISnackbar Snackbar
+
+<PageTitle>Opinion Lists</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">Opinion Lists</MudText>
+<MudText Typo="Typo.body2" Class="mb-4">
+    Corresponde à "Lista de Parecer" da v2 — agrupa avaliações de uma empresa (via
+    <MudLink Href="/contacts">Contact</MudLink>) para enviar um parecer consolidado.
+</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           Class="mb-4" OnClick="@(() => OpenForm(null))" Disabled="!CanCreate">
+    New opinion list
+</MudButton>
+
+@if (!CanCreate && _referenceDataLoaded)
+{
+    <MudAlert Severity="Severity.Info" Class="mb-4">
+        Precisas de pelo menos um <MudLink Href="/contacts">Contact</MudLink> cadastrado.
+    </MudAlert>
+}
+
+<RadzenDataGrid @ref="_grid" TItem="OpinionListDto" Data="@_items" Count="@_count" LoadData="@LoadDataAsync"
+                AllowFiltering="true" AllowSorting="true" AllowPaging="true" PageSize="25"
+                FilterMode="FilterMode.Simple" PageSizeOptions="@_pageSizeOptions">
+    <Columns>
+        <RadzenDataGridColumn TItem="OpinionListDto" Property="Code" Title="Code" Width="150px" />
+        <RadzenDataGridColumn TItem="OpinionListDto" Property="ContactName" Title="Contact" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="OpinionListDto" Property="ResponsibleName" Title="Responsible" Sortable="false" Filterable="false" />
+        <RadzenDataGridColumn TItem="OpinionListDto" Property="Date" Title="Date" FormatString="{0:dd/MM/yyyy}" Width="130px" />
+        <RadzenDataGridColumn TItem="OpinionListDto" Sortable="false" Filterable="false" Width="120px" TextAlign="TextAlign.Center">
+            <Template Context="list">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenForm(list))" />
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(list))" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<MudDialog @bind-Visible="_showForm" Options="new DialogOptions { CloseOnEscapeKey = true }">
+    <TitleContent>@(_editingList is null ? "New opinion list" : "Edit opinion list")</TitleContent>
+    <DialogContent>
+        <RadzenDropDown TValue="Guid" @bind-Value="_contactId" Data="@_contacts" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Contact" Style="width:100%;" Class="mb-2" />
+
+        <RadzenDropDown TValue="Guid" @bind-Value="_responsibleId" Data="@_users" TextProperty="Name" ValueProperty="Id"
+                        AllowVirtualization="true" AllowFiltering="true" Placeholder="Responsible" Style="width:100%;" Class="mb-2" />
+
+        <MudDatePicker @bind-Date="_date" Label="Date" Class="mb-2" />
+        <MudTextField @bind-Value="_notes" Label="Notes" Lines="3" />
+
+        @if (!string.IsNullOrEmpty(_formError))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_formError</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="CloseForm">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private RadzenDataGrid<OpinionListDto>? _grid;
+    private IEnumerable<OpinionListDto>? _items;
+    private int _count;
+    private readonly int[] _pageSizeOptions = [10, 25, 50, 100];
+    private bool _referenceDataLoaded;
+
+    private List<ContactDto>? _contacts;
+    private List<UserDto>? _users;
+
+    private bool CanCreate => _contacts is { Count: > 0 };
+
+    private bool _showForm;
+    private OpinionListDto? _editingList;
+    private Guid _contactId;
+    private Guid _responsibleId;
+    private DateTime? _date = DateTime.Today;
+    private string? _notes;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _contacts = await ContactApi.GetAllAsync();
+        _users = await UserApi.GetAllAsync();
+        _referenceDataLoaded = true;
+    }
+
+    private async Task LoadDataAsync(LoadDataArgs args)
+    {
+        var pageSize = args.Top ?? 25;
+        var page = pageSize > 0 ? (args.Skip ?? 0) / pageSize + 1 : 1;
+        var paged = await OpinionListApi.GetPagedAsync(page, pageSize, args.Filter, args.OrderBy);
+        _items = paged.Items;
+        _count = paged.TotalCount;
+    }
+
+    private void OpenForm(OpinionListDto? list)
+    {
+        _formError = null;
+        _editingList = list;
+        _contactId = list?.ContactId ?? _contacts?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _responsibleId = list?.ResponsibleId ?? _users?.FirstOrDefault()?.Id ?? Guid.Empty;
+        _date = list?.Date ?? DateTime.Today;
+        _notes = list?.Notes;
+        _showForm = true;
+    }
+
+    private void CloseForm() => _showForm = false;
+
+    private async Task SaveAsync()
+    {
+        _formError = null;
+
+        if (_date is null) return;
+
+        if (_editingList is null)
+        {
+            var createdById = await GetCurrentUserIdAsync();
+            if (createdById is null)
+            {
+                _formError = "Não foi possível identificar o utilizador autenticado.";
+                return;
+            }
+
+            await OpinionListApi.CreateAsync(new CreateOpinionListDto(_contactId, _responsibleId, _date.Value, _notes, createdById.Value));
+        }
+        else
+        {
+            await OpinionListApi.UpdateAsync(new UpdateOpinionListDto(_editingList.Id, _contactId, _responsibleId, _date.Value, _notes));
+        }
+
+        Snackbar.Add("Opinion list saved.", Severity.Success);
+        _showForm = false;
+        await ReloadGridAsync();
+    }
+
+    private async Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var state = await AuthStateProvider.GetAuthenticationStateAsync();
+        var sub = state.User.FindFirst("sub")?.Value;
+        return Guid.TryParse(sub, out var id) ? id : null;
+    }
+
+    private async Task DeleteAsync(OpinionListDto list)
+    {
+        await OpinionListApi.DeleteAsync(list.Id);
+        Snackbar.Add("Opinion list deleted.", Severity.Success);
+        await ReloadGridAsync();
+    }
+
+    private Task ReloadGridAsync() => _grid?.Reload() ?? Task.CompletedTask;
+}
